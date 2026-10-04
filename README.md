@@ -4,6 +4,8 @@ A programmable WeChat interface. Controls a WeChat client running in a Docker co
 
 This is the [iugamlabs fork](https://github.com/iugamlabs/agent-wechat) of [thisnick/agent-wechat](https://github.com/thisnick/agent-wechat), maintained for additional features while incorporating reviewed upstream updates. See [CONTRIBUTING.md](./CONTRIBUTING.md) for development and upstream synchronization, and [fork differences](./dev-notes/fork-differences.md) for implemented changes.
 
+This fork serves as the WeChat provider foundation for `iugam-wechat`. Fork release tags use `v<upstream-version>-iugam.<N>`, such as `v0.15.1-iugam.1`; see [the version policy](./dev-notes/release.md#fork-version-policy).
+
 **[Upstream documentation](https://thisnick.github.io/agent-wechat/)**
 
 The npm packages and Docker images below refer to upstream distribution channels. Fork-specific changes require builds from this checkout; the current CLI still uses upstream image and release download addresses. See [release notes](./dev-notes/release.md) for the requirements for separate fork distribution.

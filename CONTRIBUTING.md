@@ -2,6 +2,14 @@
 
 This repository is maintained at [iugamlabs/agent-wechat](https://github.com/iugamlabs/agent-wechat), with [thisnick/agent-wechat](https://github.com/thisnick/agent-wechat) as upstream. Fork features and reviewed upstream changes meet on fork `main`. Read [AGENTS.md](./AGENTS.md) for runtime boundaries and [fork differences](./dev-notes/fork-differences.md) for behavior that upstream integration must preserve. `CLAUDE.md` is a symlink to `AGENTS.md`; keep that single source of agent instructions.
 
+## Provider role and compatibility
+
+This fork serves as the WeChat provider foundation for the downstream `iugam-wechat` project. Maintain WeChat client control, local data access, and media capabilities here, and coordinate downstream provider integration and application behavior with `iugam-wechat`.
+
+When a change affects behavior used by that provider, record its API, configuration, media, or deployment implications in the PR and fork differences document. Verify affected provider integration against the candidate fork build before declaring it compatible. If the downstream project is unavailable for verification, report that limit explicitly. Public documentation refers to the downstream project by name; local checkout paths, private repository links, and deployment details stay outside this repository.
+
+Fork releases use `v<upstream-version>-iugam.<N>`, for example `v0.15.1-iugam.1`. Custom releases on the same upstream base increment `N`; moving to a new integrated upstream release resets `N` to `1`. Follow [the version policy](./dev-notes/release.md#fork-version-policy) for package versions, artifact names, and release tooling requirements. Keep the upstream base and fork revision explicit when resolving version conflicts.
+
 ## Remotes and branches
 
 Use `origin` for the fork and `upstream` to inspect and fetch upstream changes. Check each clone before working:
@@ -80,6 +88,7 @@ Resolve each conflict using the intended behavior on both branches. Do not apply
 | Database migrations | Check version collisions and schema compatibility against both branches' migration histories. Applied migrations are immutable; do not renumber or rewrite them to make Git merge cleanly. Renumbering is only appropriate for migrations confirmed never applied or shipped. Conflicting deployed histories require an explicit compatibility plan and tests using database copies before release. |
 | UI and media operations | Preserve the GUI guard, destination checks, media quality and pending semantics, and voice idempotency and partial-success reporting. |
 | Fork behavior | Run the regression checks recorded in the differences document, including when upstream implements a similar feature differently. |
+| Fork versions and provider compatibility | Preserve `-iugam.<N>` and the reviewed upstream base; coordinate any affected `iugam-wechat` provider contract and validation. |
 | CI, releases, and docs | Review publishing destinations, permissions, package identities, changeset configuration, and fork guidance. Keep upstream attribution and distinguish upstream artifacts from fork builds. |
 
 Preserve incoming changesets. Add a new changeset for additional fork behavior introduced during conflict resolution when it is not already covered; avoid duplicating upstream release entries.

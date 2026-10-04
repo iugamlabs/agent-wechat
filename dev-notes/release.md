@@ -17,9 +17,35 @@ Current distribution settings in the checked-in implementation:
 
 Before enabling fork publishing, review `.github/workflows/release.yml`, `docker-rebuild.yml`, and `deploy-docs.yml`, along with the fork's Actions settings, publishing access, and Pages configuration. The release workflow runs on pushes to `main`; the rebuild workflow is manually triggered. Keep publishing workflows disabled until their destinations and identities are configured. Actual remote Actions settings and artifact availability must be checked separately from the workflow files.
 
-Continue adding changesets for user-facing changes. Fork versions and tags must distinguish fork builds from upstream builds; document the upstream base and fork commit for each fork release. A prerelease identifier or a fork-owned version sequence can be chosen when distribution is configured. Do not reuse an upstream artifact's identity for different fork content.
+Continue adding changesets for user-facing changes and follow the fork version policy below. Do not reuse an upstream artifact's identity for different fork content.
 
 Until fork distribution is configured, build from the checkout with `pnpm build` and the appropriate `pnpm build:image:amd64` or `pnpm build:image:arm64` command. The image script creates local tags `agent-wechat:amd64` and `agent-wechat:arm64`. The CLI currently has no `wx up --image` override; use an isolated container configuration with an explicit local image and separate volumes, ports, and credentials, then point the local CLI at it with `AGENT_WECHAT_URL` and `AGENT_WECHAT_TOKEN`. Build output alone does not update a running container.
+
+## Fork version policy
+
+This fork is the WeChat provider foundation for `iugam-wechat`. Its release identifier combines the upstream base version with the current customization revision:
+
+| Identifier | Example |
+| --- | --- |
+| Git tag / release title | `v0.15.1-iugam.1` |
+| Package version / Rust crate version | `0.15.1-iugam.1` |
+| Versioned Docker image tag | `0.15.1-iugam.1` |
+| Server binary asset | `agent-server-0.15.1-iugam.1-linux-amd64` |
+| Docker tools asset | `docker-tools-0.15.1-iugam.1.tar.gz` |
+
+Version rules:
+
+1. `<upstream-version>` identifies the upstream release used as the fork base. Record its exact upstream commit SHA and the fork commit in release notes; separately identify any additional upstream commits or backports.
+2. `N` is a positive integer starting at `1`, without leading zeroes. Increment it for each new published fork revision on the same upstream base: `v0.15.1-iugam.1` → `v0.15.1-iugam.2`. Development commits do not each require a version increment.
+3. After integrating and validating a new upstream release, use its version and restart the customization revision at `1`: `v0.15.1-iugam.2` → `v0.15.2-iugam.1`. Do not advance the upstream component merely to represent a fork feature or fix.
+4. Preserve the fork suffix when upstream changes version files. Keep the packages in the existing Changesets fixed release group and the Rust server's `Cargo.toml` / `Cargo.lock` aligned with the chosen fork version; package version strings omit `v`.
+5. Published versions and their artifacts are immutable. Release changed content under a new customization revision.
+
+Under [Semantic Versioning](https://semver.org/#spec-item-9), `-iugam.N` is a prerelease suffix and has lower precedence than the same upstream version without the suffix. The project uses it to identify customization revisions. Pin the complete fork version or image digest in downstream provider deployments, and verify package-manager selection and publishing channels explicitly rather than relying on version ordering to select a fork build.
+
+For each fork release, include its upstream base, retained customizations, provider compatibility changes, validation results, and any required downstream upgrade steps. Verify affected `iugam-wechat` provider integration against the candidate artifacts; report verification that could not be performed. Record the published version in the fork differences document without adding private downstream paths or deployment details.
+
+The current `pnpm version-packages` script runs `pnpm changeset version`, synchronizes the Cargo version, and refreshes the pnpm lockfile. It has no dedicated step for selecting an upstream base and incrementing the `iugam` revision. This policy does not itself configure that automation: adapt and verify the versioning and publishing flow before the first fork release, including generated versions, changelogs, tags, and artifact names. Changesets still record package changes and their compatibility impact; the fork release version follows the base-plus-revision policy above.
 
 ## Inherited upstream publishing setup
 

@@ -8,6 +8,8 @@ The local checkout used to establish this guide is based on upstream commit `96c
 
 ## Maintained changes
 
+The fork is maintained as the WeChat provider foundation for `iugam-wechat`. Release tags follow `v<upstream-version>-iugam.<N>` (for example `v0.15.1-iugam.1`); see [the version policy](./release.md#fork-version-policy). This is a maintenance and release convention, not an implemented runtime feature or a claim that a fork release already exists.
+
 No implemented runtime differences recorded yet. Add an entry in the same PR that introduces a fork change. Include reusable fixes retained locally while awaiting upstream integration as well as fork-specific features.
 
 Use the following fields for each entry:
@@ -18,7 +20,8 @@ Use the following fields for each entry:
 | Rationale | User need and the behavior the fork must preserve. |
 | Source | Fork commit or PR; upstream source SHA or PR when applicable. |
 | Affected paths | Implementation and integration points likely to overlap upstream changes. |
-| Compatibility | API, configuration, schema, package, and architecture implications. |
+| Compatibility | API, configuration, schema, package, and architecture implications, including affected `iugam-wechat` provider behavior. |
+| Release | First fork release containing the change, its upstream base version, and exact upstream SHA; use pending until it ships. |
 | Regression checks | Test paths and commands, plus observable acceptance criteria for isolated container checks. |
 | Upstream review | Last reviewed upstream SHA, overlap, and decisions to retain, adapt, or retire the change. |
 
