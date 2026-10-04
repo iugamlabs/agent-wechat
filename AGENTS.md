@@ -17,6 +17,17 @@ This repository provides a programmable interface to a WeChat Linux client runni
 
 The active HTTP routes are assembled in `packages/agent-server-rust/src/router/mod.rs`. Request/response types live in `packages/agent-server-rust/src/ia/types.rs` and `packages/shared/src/`; keep them in sync with `pnpm generate-types` when changing Rust-exported types. The README is a concise user guide, not an exhaustive API specification.
 
+## Fork development and upstream integration
+
+This fork is maintained at `iugamlabs/agent-wechat`; upstream is `thisnick/agent-wechat`. Follow [CONTRIBUTING.md](./CONTRIBUTING.md) for the development and synchronization workflow, and consult [the fork differences](./dev-notes/fork-differences.md) before changing shared behavior.
+
+- Treat fork `main` as the integration branch. `origin` points to the fork and `upstream` is a source of changes for review. Inspect remotes and branch tracking before pulling or pushing; use explicit remote and branch names.
+- Develop on focused topic branches. Keep reusable fixes separate from fork-specific features and unrelated formatting or dependency updates. Record implemented fork behavior, its rationale, affected paths, and regression checks in the fork differences document.
+- Synchronize upstream on a dedicated `sync/upstream-*` branch based on fork `main`. Pin the reviewed upstream commit and preserve its ancestry with a merge commit; do not squash upstream synchronization or rebase/reset published fork history onto upstream. Selected backports use `git cherry-pick -x` and record their source commits.
+- Resolve conflicts by preserving both upstream fixes and intended fork behavior. Do not accept an entire side of a conflicted file without reviewing its semantics. Recheck generated types, lockfiles, database migrations, workflows, and release destinations explicitly.
+- Before a synchronization PR is merged, report the upstream range, overlapping fork changes, conflict decisions, checks actually run, and remaining verification limits. Upstream CI alone does not verify fork-specific behavior.
+- The existing npm names, CLI download destinations, and hosted documentation refer to upstream artifacts. A fork checkout does not change them. Follow [the release notes](./dev-notes/release.md) before configuring fork publishing; never describe an unverified fork artifact as available.
+
 ## Working rules
 
 - Use neutral, accurate technical language in code, comments, docs, commits, and PRs. Do not imply unauthorized access or conceal how a feature works.

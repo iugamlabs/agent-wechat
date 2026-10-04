@@ -2,7 +2,11 @@
 
 A programmable WeChat interface. Controls a WeChat client running in a Docker container — receive and send messages, see chat heads, and more via API, CLI, Wechaty puppet, or OpenClaw plugin.
 
-**[Documentation](https://thisnick.github.io/agent-wechat/)**
+This is the [iugamlabs fork](https://github.com/iugamlabs/agent-wechat) of [thisnick/agent-wechat](https://github.com/thisnick/agent-wechat), maintained for additional features while incorporating reviewed upstream updates. See [CONTRIBUTING.md](./CONTRIBUTING.md) for development and upstream synchronization, and [fork differences](./dev-notes/fork-differences.md) for implemented changes.
+
+**[Upstream documentation](https://thisnick.github.io/agent-wechat/)**
+
+The npm packages and Docker images below refer to upstream distribution channels. Fork-specific changes require builds from this checkout; the current CLI still uses upstream image and release download addresses. See [release notes](./dev-notes/release.md) for the requirements for separate fork distribution.
 
 ## Packages
 
@@ -153,7 +157,7 @@ pnpm build:image:arm64       # Build Docker image (Apple Silicon)
 pnpm build:image:amd64       # Build Docker image (Intel)
 ```
 
-See [AGENTS.md](./AGENTS.md) for contributor guidance and implementation pointers.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for the fork workflow and [AGENTS.md](./AGENTS.md) for implementation guidance. Identify an isolated development container before using `pnpm dev:deploy`.
 
 ## Ports
 
