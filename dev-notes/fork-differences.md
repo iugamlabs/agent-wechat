@@ -10,7 +10,7 @@ The local checkout used to establish this guide is based on upstream commit `96c
 
 The fork is maintained as the WeChat provider foundation for `iugam-wechat`. Release tags follow `v<upstream-version>-iugam.<N>` (for example `v0.15.1-iugam.1`); see [the version policy](./release.md#fork-version-policy). This is a maintenance and release convention, not an implemented runtime feature or a claim that a fork release already exists.
 
-No implemented runtime differences recorded yet. Add an entry in the same PR that introduces a fork change. Include reusable fixes retained locally while awaiting upstream integration as well as fork-specific features.
+The following reusable fixes are maintained locally pending upstream integration. The entries describe source changes; release and downstream compatibility verification are tracked separately.
 
 Use the following fields for each entry:
 
@@ -26,3 +26,13 @@ Use the following fields for each entry:
 | Upstream review | Last reviewed upstream SHA, overlap, and decisions to retain, adapt, or retire the change. |
 
 Record each synchronization's full range, conflict decisions, and validation in its PR. Update entries when those decisions change maintained behavior. Keep retired entries with their reason and replacement so future merges do not reintroduce them. Include only sanitized evidence; do not commit credentials, account data, cache samples, or private infrastructure details.
+
+## Contact local types (maintained)
+
+- **Rationale:** Broad `contactType=individual` cannot distinguish friends from other stored contacts. Preserve raw `localType`, without replacing the existing categories or expanding contact queries to chatrooms/system accounts.
+- **Source:** This change; see [contact investigation and implementation](./2026-10-05-contacts-local-type-fix.md). No upstream backport source.
+- **Affected paths:** Rust `ia/types.rs`, `router/contacts.rs`, `tools/wechat_contacts.rs`; shared generated `Contact` and client; CLI contact commands; Wechaty type mapping and polling cache; API reference.
+- **Compatibility:** Add numeric `localType` and optional `localType=1|3|5` query filters to both contact endpoints. Unsupported filters return HTTP 400 before session/database access. Existing client positional arguments and default scope remain. CLI supports `--local-type` and displays raw types. Wechaty uses type 1 excluding official accounts for `friend`, and polling preserves that result; chat-only fallback retains its existing behavior. `iugam-wechat` consumers must use raw type rather than broad account category to infer friendship, and refresh any incorrect cache. No friendship request API or database migration is added. A new Wechaty adapter expects the updated provider's `localType` field; older servers do not supply it.
+- **Release:** Pending. Upstream package base is `0.15.1` at `96c2e90c497d999bf5189a134a9b3b293731f42e`; fork release suffix remains governed by the release policy.
+- **Regression checks:** Rust in-memory SQL fixtures, response serialization and query extraction/HTTP 400 tests; `tests/contacts-client.test.cjs`; Wechaty `type-map.test.ts` and `contact-cache.test.ts`; `pnpm generate-types`, build and typecheck. AMD64/Ubuntu 22.04 isolated account checks passed for list/find filters and raw types, with built CLI/shared client verification; human confirmation of friendship/group-only identities and downstream cache migration remain separate.
+- **Upstream review:** Scope follows the sanitized investigation. No additional upstream synchronization was performed for this fix.

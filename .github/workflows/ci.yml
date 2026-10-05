@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'packages/**'
+      - 'tests/contacts-client.test.cjs'
       - 'docs/**'
       - 'pnpm-lock.yaml'
       - 'package.json'
@@ -27,6 +28,7 @@ jobs:
           filters: |
             ts:
               - 'packages/cli/**'
+              - 'tests/contacts-client.test.cjs'
               - 'packages/shared/**'
               - 'packages/openclaw-extension/**'
               - 'packages/wechaty-gateway/**'

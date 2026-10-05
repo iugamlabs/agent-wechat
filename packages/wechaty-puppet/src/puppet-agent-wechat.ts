@@ -277,7 +277,11 @@ export class PuppetAgentWeChat extends PUPPET.Puppet {
         if (chat.isGroup) {
           this.roomStore.set(chat.username, chatToRoomPayload(chat))
         } else {
-          this.contactStore.set(chat.username, chatToContactPayload(chat))
+          const knownContact = this.contactStore.get(chat.username)
+          this.contactStore.set(chat.username, {
+            ...chatToContactPayload(chat),
+            ...(knownContact ? { friend: knownContact.friend, type: knownContact.type } : {}),
+          })
         }
       }
 

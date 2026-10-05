@@ -10,7 +10,8 @@
   ],
   "scripts": {
     "build": "node build.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test ../../tests/contacts-client.test.cjs"
   },
   "dependencies": {
     "qrcode-terminal": "^0.12.0"

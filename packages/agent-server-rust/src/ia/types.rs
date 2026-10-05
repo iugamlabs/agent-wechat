@@ -390,6 +390,9 @@ pub struct Contact {
     pub small_head_url: Option<String>,
     /// "individual", "official", "chatroom", or "openim"
     pub contact_type: String,
+    // Raw contact.db local_type: 1=friend/official, 3=other stored contact, 5=openim.
+    #[ts(type = "number")]
+    pub local_type: i64,
 }
 
 // ============================================
