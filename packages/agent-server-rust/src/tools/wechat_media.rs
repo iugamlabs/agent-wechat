@@ -259,7 +259,7 @@ fn get_image_thumbnail(
             .join(&thumb_name);
         if thumb_path.exists() {
             if let Ok(data) = fs::read(&thumb_path) {
-                if convert_media("validate-image", &data).is_some() {
+                if let Some((data, _)) = convert_media("normalize-image", &data) {
                     return Some(MediaResult {
                         media_type: "image".into(),
                         data: Some(base64::Engine::encode(
@@ -288,7 +288,7 @@ fn get_image_thumbnail(
                 let name = entry.file_name().to_string_lossy().to_string();
                 if name.starts_with(&prefix) {
                     if let Ok(data) = fs::read(entry.path()) {
-                        if convert_media("validate-image", &data).is_some() {
+                        if let Some((data, _)) = convert_media("normalize-image", &data) {
                             return Some(MediaResult {
                                 media_type: "image".into(),
                                 data: Some(base64::Engine::encode(
@@ -311,13 +311,9 @@ fn get_image_thumbnail(
 
 // ── .dat file decryption ─────────────────────────────────────────────────────
 
-fn aligned_aes_size(enc_chunk_size: u32) -> u32 {
-    let rem = enc_chunk_size % 16;
-    if rem == 0 {
-        enc_chunk_size + 16
-    } else {
-        enc_chunk_size + (16 - rem)
-    }
+fn aligned_aes_size(enc_chunk_size: u32) -> Option<usize> {
+    let size = enc_chunk_size as usize;
+    size.checked_add(16 - size % 16)
 }
 
 fn decrypt_dat_head(dat: &[u8], aes_key_hex: &str) -> Option<(Vec<u8>, u32)> {
@@ -325,9 +321,9 @@ fn decrypt_dat_head(dat: &[u8], aes_key_hex: &str) -> Option<(Vec<u8>, u32)> {
         return None;
     }
     let enc_chunk_size = u32::from_le_bytes(dat[6..10].try_into().ok()?);
-    let aes_key = &aes_key_hex.as_bytes()[..16]; // first 16 ASCII chars
+    let aes_key = aes_key_hex.as_bytes().get(..16)?; // first 16 ASCII chars
 
-    let aligned = aligned_aes_size(enc_chunk_size) as usize;
+    let aligned = aligned_aes_size(enc_chunk_size)?;
     if dat.len() < 15 + aligned {
         return None;
     }
@@ -361,6 +357,9 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 fn derive_xor_byte(dat: &[u8], dec_head: &[u8]) -> Option<u8> {
+    if dat.len() < 2 {
+        return None;
+    }
     if dec_head.len() >= 2 && dec_head[0] == 0xff && dec_head[1] == 0xd8 {
         // JPEG: last 2 bytes should be FF D9
         let c1 = dat[dat.len() - 2] ^ 0xFF;
@@ -395,38 +394,70 @@ fn derive_xor_byte(dat: &[u8], dec_head: &[u8]) -> Option<u8> {
     None
 }
 
-fn resolve_xor_byte(
-    dat_path: &str,
-    dat: &[u8],
-    image_keys: &ImageKeys,
-) -> Option<u8> {
+/// Bound JPEG recovery across the requested image and at most two sibling thumbnails.
+fn infer_xor_byte(dat: &[u8], image_keys: &ImageKeys, deadline: std::time::Instant) -> Option<u8> {
+    let (head, _) = decrypt_dat_head(dat, &image_keys.aes_key_hex)?;
+    let xor_size = u32::from_le_bytes(dat[10..14].try_into().ok()?);
+    if xor_size == 0 {
+        return Some(0);
+    }
+    if !head.starts_with(&[0xff, 0xd8]) {
+        return derive_xor_byte(dat, &head);
+    }
+    let decrypted = decrypt_dat(dat, &image_keys.aes_key_hex, 0)?;
+    let remaining = deadline.checked_duration_since(std::time::Instant::now())?;
+    let mut input = Vec::new();
+    input.extend_from_slice(&xor_size.to_le_bytes());
+    input.extend_from_slice(&(remaining.as_millis().min(3000) as u32).to_le_bytes());
+    input.extend_from_slice(&decrypted);
+    let (result, _) = convert_media("recover-jpeg-xor", &input)?;
+    if result.len() == 1 {
+        Some(result[0])
+    } else {
+        None
+    }
+}
+
+fn resolve_xor_byte(dat_path: &str, dat: &[u8], image_keys: &ImageKeys) -> Option<u8> {
     if let Some(xb) = image_keys.xor_byte {
         return Some(xb);
     }
-    let (dec_head, _) = decrypt_dat_head(dat, &image_keys.aes_key_hex)?;
-    let xb = derive_xor_byte(dat, &dec_head);
-    if xb.is_some() {
-        return xb;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    if let Some(xb) = infer_xor_byte(dat, image_keys, deadline) {
+        return Some(xb);
     }
-    // Try sibling _t.dat files (JPEG thumbnails are reliable for XOR derivation)
     let dir = Path::new(dat_path).parent()?;
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if !name.ends_with("_t.dat") {
-                continue;
+    // Prefer this image's own thumbnail before unrelated directory entries.
+    let path = Path::new(dat_path);
+    let stem = path.file_stem()?.to_str()?;
+    let stem = stem
+        .strip_suffix("_h")
+        .or_else(|| stem.strip_suffix("_t"))
+        .unwrap_or(stem);
+    let matching_thumb = dir.join(format!("{stem}_t.dat"));
+    let mut attempts = 0;
+    if matching_thumb != path && std::time::Instant::now() < deadline {
+        if let Ok(sibling) = fs::read(&matching_thumb) {
+            attempts += 1;
+            if let Some(xb) = infer_xor_byte(&sibling, image_keys, deadline) {
+                return Some(xb);
             }
-            if let Ok(sib) = fs::read(entry.path()) {
-                if sib.len() < 15 || sib[..6] != DAT_MAGIC {
-                    continue;
-                }
-                if let Some((sib_head, _)) =
-                    decrypt_dat_head(&sib, &image_keys.aes_key_hex)
-                {
-                    if let Some(xb) = derive_xor_byte(&sib, &sib_head) {
-                        return Some(xb);
-                    }
-                }
+        }
+    }
+    let entries = fs::read_dir(dir).ok()?;
+    // Limit directory work and decoder attempts. Never alter WeChat cache files.
+    for entry in entries.take(64).flatten() {
+        if std::time::Instant::now() >= deadline || attempts >= 2 {
+            break;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.ends_with("_t.dat") || entry.path() == path || entry.path() == matching_thumb {
+            continue;
+        }
+        attempts += 1;
+        if let Ok(sibling) = fs::read(entry.path()) {
+            if let Some(xb) = infer_xor_byte(&sibling, image_keys, deadline) {
+                return Some(xb);
             }
         }
     }
@@ -436,10 +467,10 @@ fn resolve_xor_byte(
 fn decrypt_dat(dat: &[u8], aes_key_hex: &str, xor_byte: u8) -> Option<Vec<u8>> {
     let (dec_head, enc_chunk_size) = decrypt_dat_head(dat, aes_key_hex)?;
     let xor_size = u32::from_le_bytes(dat[10..14].try_into().ok()?) as usize;
-    let aes_ct_end = 15 + aligned_aes_size(enc_chunk_size) as usize;
+    let aes_ct_end = 15 + aligned_aes_size(enc_chunk_size)?;
     let remaining = &dat[aes_ct_end..];
 
-    let raw_length = remaining.len().saturating_sub(xor_size);
+    let raw_length = remaining.len().checked_sub(xor_size)?;
     let raw_data = &remaining[..raw_length];
     let xor_data = &remaining[raw_length..];
 
@@ -474,7 +505,18 @@ fn detect_image_format(data: &[u8]) -> (&'static str, &'static str) {
 /// Convert media via the media-convert tool.
 fn convert_media(mode: &str, input: &[u8]) -> Option<(Vec<u8>, String)> {
     use std::io::Write;
-    let mut child = Command::new("media-convert")
+    #[cfg(not(test))]
+    let mut converter = Command::new("media-convert");
+    #[cfg(test)]
+    let mut converter = {
+        let mut command = Command::new("python3");
+        command.arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docker/tools/media-convert.py"
+        ));
+        command
+    };
+    let mut child = converter
         .arg(mode)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -826,50 +868,26 @@ fn extract_file_hash_from_packed_info(hex_info: &str) -> Option<String> {
     None
 }
 
-fn decrypt_and_return(
-    dat_path: &str,
-    image_keys: &ImageKeys,
-    local_id: i64,
-) -> MediaResult {
+fn decrypt_and_return(dat_path: &str, image_keys: &ImageKeys, local_id: i64) -> MediaResult {
     let dat = match fs::read(dat_path) {
         Ok(d) => d,
         Err(_) => {
-            return MediaResult {
-                media_type: "image".into(),
-                data: None,
-                url: None,
-                format: "jpeg".into(),
-                filename: format!("msg_{local_id}.jpg"),
-                quality: None,
-            }
+            tracing::warn!("[media:image] cache read failed");
+            return pending();
         }
     };
-
     let xor_byte = match resolve_xor_byte(dat_path, &dat, image_keys) {
         Some(xb) => xb,
         None => {
-            return MediaResult {
-                media_type: "image".into(),
-                data: None,
-                url: None,
-                format: "jpeg".into(),
-                filename: format!("msg_{local_id}.jpg"),
-                quality: None,
-            }
+            tracing::warn!("[media:image] XOR derivation failed");
+            return pending();
         }
     };
-
     let decrypted = match decrypt_dat(&dat, &image_keys.aes_key_hex, xor_byte) {
         Some(d) => d,
         None => {
-            return MediaResult {
-                media_type: "image".into(),
-                data: None,
-                url: None,
-                format: "jpeg".into(),
-                filename: format!("msg_{local_id}.jpg"),
-                quality: None,
-            }
+            tracing::warn!("[media:image] decryption failed");
+            return pending();
         }
     };
 
@@ -878,7 +896,10 @@ fn decrypt_and_return(
     // A different quality must not substitute for an incomplete requested image.
     if format == "wxgf" {
         if let Some((converted, cfmt)) = convert_media("wxgf2img", &decrypted) {
-            if convert_media("validate-image", &converted).is_none() { return pending(); }
+            let Some((converted, _)) = convert_media("normalize-image", &converted) else {
+                tracing::warn!("[media:image] converted image validation failed");
+                return pending();
+            };
             let cext = if cfmt == "jpeg" {
                 "jpg".to_string()
             } else {
@@ -896,10 +917,14 @@ fn decrypt_and_return(
                 quality: None,
             };
         }
+        tracing::warn!("[media:image] WXGF conversion failed");
         return pending();
     }
 
-    if convert_media("validate-image", &decrypted).is_none() { return pending(); }
+    let Some((decrypted, _)) = convert_media("normalize-image", &decrypted) else {
+        tracing::warn!("[media:image] format validation failed");
+        return pending();
+    };
 
     MediaResult {
         media_type: "image".into(),
@@ -1181,14 +1206,7 @@ fn get_image_for_quality(
         tracing::warn!("[media] no image keys available for local_id={}", local_id);
     }
 
-    MediaResult {
-        media_type: "image".into(),
-        data: None,
-        url: None,
-        format: "jpeg".into(),
-        filename: format!("msg_{local_id}.jpg"),
-        quality: None,
-    }
+    pending()
 }
 
 /// Get media attachment for a message.
@@ -1376,5 +1394,183 @@ mod quality_tests {
         for name in ["", ".", "..", "../file", "/etc/passwd", "folder\\file", "a\0b"] {
             assert!(!safe_attachment_name(name));
         }
+    }
+}
+
+#[cfg(test)]
+mod decryption_tests {
+    use super::*;
+    use std::io::Write;
+
+    const JPEG: &[u8] = include_bytes!("../../../../tests/fixtures/synthetic.jpg");
+    const AES_KEY: &str = "0123456789abcdef0123456789abcdef";
+    const XOR: u8 = 0x63;
+
+    fn fixture(plain: &[u8], xor_size: usize) -> Vec<u8> {
+        let head_size = 64usize;
+        let mut child = Command::new("openssl")
+            .args(["enc", "-aes-128-ecb", "-K"])
+            .arg(hex_encode(&AES_KEY.as_bytes()[..16]))
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(&plain[..head_size])
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        let mut dat = DAT_MAGIC.to_vec();
+        dat.extend_from_slice(&(head_size as u32).to_le_bytes());
+        dat.extend_from_slice(&(xor_size as u32).to_le_bytes());
+        dat.push(0);
+        dat.extend_from_slice(&output.stdout);
+        dat.extend_from_slice(&plain[head_size..plain.len() - xor_size]);
+        dat.extend(plain[plain.len() - xor_size..].iter().map(|b| b ^ XOR));
+        dat
+    }
+
+    fn has_runtime_codec() -> bool {
+        let available = Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if !available {
+            eprintln!("JPEG integration fixture requires FFmpeg");
+        }
+        available
+    }
+
+    #[test]
+    fn jpeg_dat_recovers_without_saved_xor_and_normalizes_trailers() {
+        if !has_runtime_codec() {
+            return;
+        }
+        for trailing in [0, 24, 191] {
+            let mut plain = JPEG.to_vec();
+            plain.extend(vec![b'X'; trailing]);
+            let dat = fixture(&plain, 1024);
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("image.dat");
+            fs::write(&path, &dat).unwrap();
+            for saved in [None, Some(XOR)] {
+                let keys = ImageKeys {
+                    aes_key_hex: AES_KEY.into(),
+                    xor_byte: saved,
+                };
+                assert_eq!(
+                    resolve_xor_byte(path.to_str().unwrap(), &dat, &keys),
+                    Some(XOR)
+                );
+                let result = decrypt_and_return(path.to_str().unwrap(), &keys, 42);
+                assert_eq!(result.media_type, "image");
+                assert_eq!(result.format, "jpeg");
+                let bytes = base64::Engine::decode(
+                    &base64::engine::general_purpose::STANDARD,
+                    result.data.unwrap(),
+                )
+                .unwrap();
+                assert_eq!(bytes, JPEG);
+                assert_eq!(fs::read(&path).unwrap(), dat); // Cache bytes remain untouched.
+            }
+        }
+    }
+
+    #[test]
+    fn derives_from_sibling_thumbnail_with_trailing_data() {
+        if !has_runtime_codec() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("image.dat");
+        let mut wxgf = vec![0; 200];
+        wxgf[..4].copy_from_slice(b"wxgf");
+        let dat = fixture(&wxgf, 100);
+        fs::write(&path, &dat).unwrap();
+        let mut thumbnail = JPEG.to_vec();
+        thumbnail.extend(vec![b'X'; 24]);
+        fs::write(dir.path().join("image_t.dat"), fixture(&thumbnail, 1024)).unwrap();
+        let keys = ImageKeys {
+            aes_key_hex: AES_KEY.into(),
+            xor_byte: None,
+        };
+        assert_eq!(
+            resolve_xor_byte(path.to_str().unwrap(), &dat, &keys),
+            Some(XOR)
+        );
+    }
+
+    #[test]
+    fn invalid_decryption_returns_pending_without_image_bytes() {
+        if !has_runtime_codec() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("image.dat");
+        fs::write(&path, fixture(JPEG, 1024)).unwrap();
+        for keys in [
+            ImageKeys {
+                aes_key_hex: AES_KEY.into(),
+                xor_byte: Some(XOR ^ 1),
+            },
+            ImageKeys {
+                aes_key_hex: "bad".into(),
+                xor_byte: Some(XOR),
+            },
+            ImageKeys {
+                aes_key_hex: "ffffffffffffffffffffffffffffffff".into(),
+                xor_byte: Some(XOR),
+            },
+        ] {
+            let result = decrypt_and_return(path.to_str().unwrap(), &keys, 42);
+            assert_eq!(result.media_type, "pending");
+            assert!(result.data.is_none());
+        }
+        let mut truncated = JPEG[..JPEG.len() - 100].to_vec();
+        truncated.extend_from_slice(&[0xff, 0xd9]);
+        fs::write(&path, fixture(&truncated, 1024)).unwrap();
+        let keys = ImageKeys {
+            aes_key_hex: AES_KEY.into(),
+            xor_byte: None,
+        };
+        assert_eq!(
+            decrypt_and_return(path.to_str().unwrap(), &keys, 42).media_type,
+            "pending"
+        );
+        fs::remove_file(&path).unwrap();
+        assert_eq!(
+            decrypt_and_return(path.to_str().unwrap(), &keys, 42).media_type,
+            "pending"
+        );
+    }
+
+    #[test]
+    fn invalid_dat_lengths_and_short_keys_do_not_panic() {
+        assert_eq!(decrypt_dat_head(&[], AES_KEY), None);
+        assert_eq!(derive_xor_byte(&[], &[0xff, 0xd8]), None);
+        assert_eq!(
+            get_image_for_quality(
+                "fixture",
+                &HashMap::new(),
+                "peer",
+                42,
+                0,
+                "",
+                None,
+                ImageQuality::Full
+            )
+            .media_type,
+            "pending"
+        );
+        let mut dat = fixture(JPEG, 1024);
+        assert!(decrypt_dat(&dat, "bad", XOR).is_none());
+        dat[10..14].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(decrypt_dat(&dat, AES_KEY, XOR).is_none());
+        dat[6..10].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(decrypt_dat_head(&dat, AES_KEY).is_none());
     }
 }

@@ -5,6 +5,8 @@ on:
     paths:
       - 'packages/**'
       - 'tests/contacts-client.test.cjs'
+      - 'tests/fixtures/**'
+      - 'docker/tools/media-convert.py'
       - 'docs/**'
       - 'pnpm-lock.yaml'
       - 'package.json'
@@ -41,6 +43,8 @@ jobs:
               - '.github/workflows/ci.yml'
             rust:
               - 'packages/agent-server-rust/**'
+              - 'tests/fixtures/**'
+              - 'docker/tools/media-convert.py'
               - '.github/workflows/ci.yml'
             docs:
               - 'docs/**'
@@ -90,6 +94,9 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install media test codecs
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg openssl
 
       - name: Cargo check
         run: cargo check --manifest-path packages/agent-server-rust/Cargo.toml

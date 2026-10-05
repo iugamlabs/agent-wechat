@@ -111,7 +111,7 @@ class DownloadGuards(unittest.TestCase):
                 convert.validate_image(data)
 
     def test_codec_warnings_do_not_reject_complete_image(self):
-        data = b'\xff\xd8photo\xff\xd9'
+        data = (ROOT / 'tests/fixtures/synthetic.jpg').read_bytes()
         warning = b'unable to decode APP fields: Invalid data found when processing input'
         with patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, b'', warning)):
             self.assertEqual(convert.validate_image(data), (b'ok', 'validation'))
