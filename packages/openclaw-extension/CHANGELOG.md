@@ -1,5 +1,44 @@
 # @agent-wechat/wechat
 
+## 0.16.0
+
+### Minor Changes
+
+- [#211](https://github.com/thisnick/agent-wechat/pull/211) [`e743310`](https://github.com/thisnick/agent-wechat/commit/e743310cd08df14d6595ac1b3481f65a2194c118) Thanks [@thisnick](https://github.com/thisnick)! - Decide WeChat access with OpenClaw's channel ingress policy instead of a local copy of it. DM and group sender gates, per-group overrides, control-command authorization and @mention gating now come from core, so `accessGroup:<name>` entries work in `allowFrom`, `groupAllowFrom` and per-group `allowFrom`. Existing configs keep their behavior, with two exceptions:
+
+  - The pairing store no longer admits group senders or authorizes commands. WeChat has no pairing flow, so the store is normally empty.
+  - `dmPolicy: "open"` without `"*"` in `allowFrom` still admits everyone, but now logs a reminder to add `"*"`.
+
+## 0.15.6
+
+### Patch Changes
+
+- [#208](https://github.com/thisnick/agent-wechat/pull/208) [`82a1cd9`](https://github.com/thisnick/agent-wechat/commit/82a1cd9d6f7690a976ae5531d6dab31600d5731f) Thanks [@thisnick](https://github.com/thisnick)! - Load on OpenClaw 2026.10.2, which removed the `channel-message`, `channel-reply-pipeline`, `config-runtime` and `command-auth` SDK subpaths. Outbound and reply-pipeline helpers now come from `channel-outbound`, group-policy helpers from `runtime-group-policy`, and sender command authorization is resolved in the plugin with the same rules as before. Still works on 2026.9.x.
+
+## 0.15.5
+
+### Patch Changes
+
+- [#206](https://github.com/thisnick/agent-wechat/pull/206) [`666deea`](https://github.com/thisnick/agent-wechat/commit/666deea513e22551b0fbf04b8a360c430892db9d) Thanks [@thisnick](https://github.com/thisnick)! - Allow releases to proceed after successful npm publication without waiting for registry propagation, and resume binary and Docker publication when npm packages already exist but the GitHub release is missing.
+
+## 0.15.4
+
+### Patch Changes
+
+- [#204](https://github.com/thisnick/agent-wechat/pull/204) [`40d6dde`](https://github.com/thisnick/agent-wechat/commit/40d6dde0c8ac90e6e5fca4b6db8a2f73020215af) Thanks [@thisnick](https://github.com/thisnick)! - Fix GitHub OIDC release publishing by ensuring pnpm uses the pinned, OIDC-capable npm instead of Node's bundled npm. Add a publishing-subprocess dry-run check so an incorrect npm version fails before publication.
+
+## 0.15.3
+
+### Patch Changes
+
+- [#202](https://github.com/thisnick/agent-wechat/pull/202) [`e321b5b`](https://github.com/thisnick/agent-wechat/commit/e321b5b9b3557e41e5b6b84a5a41f8dead0ee68b) Thanks [@thisnick](https://github.com/thisnick)! - Retrieve supported WeChat type-47 stickers through the existing media endpoint, preserving GIF animation. Download and validate original CDN bytes into a bounded, account-scoped server cache without opening chats or writing to WeChat's cache. Existing CLI media commands can save the returned sticker files; automatic OpenClaw sticker ingestion is unchanged.
+
+## 0.15.2
+
+### Patch Changes
+
+- [#199](https://github.com/thisnick/agent-wechat/pull/199) [`b5ee9ac`](https://github.com/thisnick/agent-wechat/commit/b5ee9ac123d6fb2a3de6e3e54a2a7a5b233ba81d) Thanks [@thisnick](https://github.com/thisnick)! - Report explicitly expired, uncached media without retrying native downloads. Preserve cached attachments and show expiry in matching CLI and OpenClaw attachment feedback.
+
 ## 0.15.1
 
 ### Patch Changes

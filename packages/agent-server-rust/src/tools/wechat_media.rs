@@ -52,6 +52,7 @@ fn unsupported() -> MediaResult {
         format: String::new(),
         filename: String::new(),
         quality: None,
+        ..Default::default()
     }
 }
 
@@ -63,6 +64,7 @@ pub(crate) fn pending() -> MediaResult {
         format: String::new(),
         filename: String::new(),
         quality: None,
+        ..Default::default()
     }
 }
 
@@ -200,6 +202,18 @@ fn lookup_message_raw(
     Some((local_type, create_time, body))
 }
 
+/// Sticker retrieval is separate from the native image/file transfer queue.
+pub fn sticker_metadata(
+    account: &str,
+    keys: &HashMap<String, String>,
+    chat: &str,
+    id: i64,
+) -> Option<Result<super::sticker_media::Sticker, super::sticker_media::Failure>> {
+    let (kind, created_at, content) = lookup_message_raw(account, keys, chat, id)?;
+    ((kind & 0xFFFFFFFF) == 47)
+        .then(|| super::sticker_media::Sticker::parse(&content, created_at))
+}
+
 /// Extract an XML attribute value.
 fn xml_attr(xml: &str, attr: &str) -> Option<String> {
     let pat = format!("{attr}=\"");
@@ -270,6 +284,7 @@ fn get_image_thumbnail(
                         format: "jpeg".into(),
                         filename: format!("msg_{local_id}.jpg"),
                         quality: None,
+                        ..Default::default()
                     });
                 }
             }
@@ -299,6 +314,7 @@ fn get_image_thumbnail(
                                 format: "jpeg".into(),
                                 filename: format!("msg_{local_id}.jpg"),
                                 quality: None,
+                                ..Default::default()
                             });
                         }
                     }
@@ -748,6 +764,7 @@ fn get_video_data(
                     format: "mp4".into(),
                     filename: format!("msg_{local_id}.mp4"),
                     quality: None,
+                    ..Default::default()
                 };
             }
         }
@@ -771,6 +788,7 @@ fn get_video_data(
                         format: "jpeg".into(),
                         filename: format!("msg_{local_id}_cover.jpg"),
                         quality: None,
+                        ..Default::default()
                     };
                 }
             }
@@ -790,6 +808,7 @@ fn get_video_data(
                         format: "jpeg".into(),
                         filename: format!("msg_{local_id}_thumb.jpg"),
                         quality: None,
+                        ..Default::default()
                     };
                 }
             }
@@ -841,6 +860,7 @@ fn decrypt_and_return(
                 format: "jpeg".into(),
                 filename: format!("msg_{local_id}.jpg"),
                 quality: None,
+                ..Default::default()
             }
         }
     };
@@ -855,6 +875,7 @@ fn decrypt_and_return(
                 format: "jpeg".into(),
                 filename: format!("msg_{local_id}.jpg"),
                 quality: None,
+                ..Default::default()
             }
         }
     };
@@ -869,6 +890,7 @@ fn decrypt_and_return(
                 format: "jpeg".into(),
                 filename: format!("msg_{local_id}.jpg"),
                 quality: None,
+                ..Default::default()
             }
         }
     };
@@ -894,6 +916,7 @@ fn decrypt_and_return(
                 format: cfmt,
                 filename: format!("msg_{local_id}.{cext}"),
                 quality: None,
+                ..Default::default()
             };
         }
         return pending();
@@ -911,69 +934,7 @@ fn decrypt_and_return(
         format: format.into(),
         filename: format!("msg_{local_id}.{ext}"),
         quality: None,
-    }
-}
-
-// ── Emoji ────────────────────────────────────────────────────────────────────
-
-fn get_emoji_media(
-    account_dir: &str,
-    keys: &HashMap<String, String>,
-    content: &str,
-    _local_id: i64,
-) -> MediaResult {
-    let md5_val = match xml_attr(content, "md5") {
-        Some(m) => m,
-        None => return unsupported(),
-    };
-
-    // Look up CDN URL from emoticon.db
-    if let Some(emoticon_key) = keys.get("emoticon.db") {
-        let emoticon_db = get_db_path(account_dir, "emoticon.db");
-        let rows = query_wechat_db(
-            &emoticon_db,
-            emoticon_key,
-            &format!(
-                "SELECT cdn_url FROM kNonStoreEmoticonTable WHERE md5 = '{md5_val}' LIMIT 1;"
-            ),
-        );
-        if let Some(row) = rows.first() {
-            if let Some(url) = row.get("cdn_url").and_then(|v| v.as_str()) {
-                if !url.is_empty() {
-                    return MediaResult {
-                        media_type: "emoji".into(),
-                        data: None,
-                        url: Some(url.to_string()),
-                        format: "gif".into(),
-                        filename: format!("emoji_{md5_val}.gif"),
-                        quality: None,
-                    };
-                }
-            }
-        }
-    }
-
-    // Fallback: extract cdnurl from message XML
-    if let Some(url) = xml_attr(content, "cdnurl") {
-        if url.starts_with("http") {
-            return MediaResult {
-                media_type: "emoji".into(),
-                data: None,
-                url: Some(url),
-                format: "gif".into(),
-                filename: format!("emoji_{md5_val}.gif"),
-                quality: None,
-            };
-        }
-    }
-
-    MediaResult {
-        media_type: "emoji".into(),
-        data: None,
-        url: None,
-        format: "unknown".into(),
-        filename: format!("emoji_{md5_val}"),
-        quality: None,
+        ..Default::default()
     }
 }
 
@@ -1043,6 +1004,7 @@ fn get_voice_data(
                 format: "mp3".into(),
                 filename: format!("msg_{local_id}.mp3"),
                 quality: None,
+                ..Default::default()
             };
         }
 
@@ -1057,6 +1019,7 @@ fn get_voice_data(
             format: "silk".into(),
             filename: format!("msg_{local_id}.silk"),
             quality: None,
+            ..Default::default()
         };
     }
 
@@ -1102,6 +1065,7 @@ fn get_file_attachment(
                     format: ext,
                     filename,
                     quality: None,
+                    ..Default::default()
                 };
             }
         }
@@ -1188,6 +1152,7 @@ fn get_image_for_quality(
         format: "jpeg".into(),
         filename: format!("msg_{local_id}.jpg"),
         quality: None,
+        ..Default::default()
     }
 }
 
@@ -1260,8 +1225,9 @@ pub fn get_message_media(
             get_voice_data(account_dir, keys, chat_id, local_id)
         }
         47 => {
-            // Emoji — CDN URL is included in message content, not a downloadable media
-            unsupported()
+            // The async route resolves server-owned sticker cache/CDN bytes.
+            // Never send signed CDN URLs or encryption keys to clients.
+            MediaResult { media_type: "emoji".into(), ..Default::default() }
         }
         _ => {
             // Other types: check for cached thumbnail
