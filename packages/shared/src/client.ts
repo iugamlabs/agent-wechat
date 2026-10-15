@@ -174,12 +174,13 @@ export class WeChatClient {
   async listContacts(
     limit?: number,
     offset?: number,
+    localType?: number,
   ): Promise<Contact[]> {
-    return this.get(`/api/contacts${qs({ limit, offset })}`);
+    return this.get(`/api/contacts${qs({ limit, offset, localType })}`);
   }
 
-  async findContacts(name: string): Promise<Contact[]> {
-    return this.get(`/api/contacts/find${qs({ name })}`);
+  async findContacts(name: string, localType?: number): Promise<Contact[]> {
+    return this.get(`/api/contacts/find${qs({ name, localType })}`);
   }
 
   // ---- Messages ----

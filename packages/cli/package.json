@@ -11,7 +11,7 @@
   "scripts": {
     "build": "node build.js",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --experimental-strip-types src/lib/*.test.mjs"
+    "test": "node --test --experimental-strip-types src/lib/*.test.mjs ../../tests/contacts-client.test.cjs"
   },
   "dependencies": {
     "qrcode-terminal": "^0.12.0"

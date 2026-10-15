@@ -6,6 +6,7 @@ on:
       - 'docker/tools/**.py'
       - 'docker/tools/media-download.js'
       - 'tests/test_*.py'
+      - 'tests/fixtures/**'
       - 'tests/media-download.test.cjs'
       - '.github/workflows/python-tools.yml'
 
@@ -17,6 +18,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       # SQLCipher 4 integration is additionally exercised in research containers.
       - run: python3 -m unittest discover -s tests -v
       - uses: actions/setup-node@v4

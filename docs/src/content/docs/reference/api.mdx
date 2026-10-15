@@ -56,7 +56,42 @@ require the original-resolution copy.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/contacts` | List all contacts |
+| `GET` | `/api/contacts` | List stored contacts (`limit=200`, `offset=0`, optional `localType`) |
+| `GET` | `/api/contacts/find` | Search by required `name`, optional `localType` (up to 50 matches) |
+
+Both endpoints return an array of contacts with `username`, `nickName`,
+`contactType`, and numeric `localType`; `remark`, `alias`, and `smallHeadUrl`
+are optional. Search partially matches nickname, remark, alias, or username.
+
+`contactType` remains `individual`, `official`, `chatroom`, or `openim`.
+It is a broad account category: `individual` alone does not indicate friendship.
+`localType` preserves the raw `contact.db` value:
+
+| Value | Meaning | Included in these endpoints |
+|-------|---------|-----------------------------|
+| `0` | System notifications | No |
+| `1` | Friends and official accounts | Yes |
+| `2` | Chatrooms | No |
+| `3` | Other stored contacts, including people encountered in groups | Yes |
+| `5` | Enterprise WeChat (openim) | Yes |
+
+Omitting `localType` includes `1`, `3`, and `5`. System usernames and usernames
+ending in `@chatroom` are excluded. A filter accepts only `1`, `3`, or `5`;
+other values return HTTP 400, even when no session is logged in. Filtering does
+not broaden the default scope. A missing logged-in session or unavailable
+contact data still returns an empty array.
+
+```sh
+wx contacts list --local-type 1
+wx contacts find Alice --local-type 3 --json
+```
+
+The shared client exposes `listContacts(limit?, offset?, localType?)` and
+`findContacts(name, localType?)`. Existing calls retain their default scope.
+CLI text output includes `LocalType`; JSON output contains `localType`.
+Wechaty contact payloads set `friend` only for `localType === 1`, excluding
+official accounts. Chat-derived contact fallback retains its existing behavior;
+this does not implement Wechaty friendship request APIs.
 
 ### Sessions
 

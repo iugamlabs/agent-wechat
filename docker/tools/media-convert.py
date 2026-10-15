@@ -19,34 +19,174 @@ import os
 import struct
 import subprocess
 import tempfile
+import time
 
 MIN_RATIO = 0.6
 
 
-def validate_image(data):
-    """Reject incomplete cache writes before decoding with the runtime codec."""
+MAX_JPEG_TRAILING_BYTES = 4096
+MAX_XOR_CANDIDATES = 32
+XOR_RECOVERY_SECONDS = 3.0
+
+
+def normalize_jpeg(data):
+    """Find the structural EOI, skipping length-delimited metadata and scan stuffing.
+
+    Never search for the last FF D9: APP payloads and trailing bytes can contain it.
+    Pixel completeness is checked separately by the strict runtime decoder.
+    """
+    if not data.startswith(b'\xff\xd8'):
+        raise ValueError('Invalid JPEG header')
+    pos, in_scan, saw_frame, saw_scan = 2, False, False, False
+    while pos < len(data):
+        if in_scan:
+            pos = data.find(b'\xff', pos)
+            if pos < 0:
+                break
+        elif data[pos] != 0xff:
+            raise ValueError('Invalid JPEG marker')
+        while pos < len(data) and data[pos] == 0xff:
+            pos += 1
+        if pos >= len(data):
+            break
+        marker = data[pos]
+        pos += 1
+        if in_scan and (marker == 0 or 0xd0 <= marker <= 0xd7):
+            continue
+        was_in_scan = in_scan
+        in_scan = False
+        if marker == 0xd9:
+            if not saw_frame or not saw_scan:
+                raise ValueError('JPEG has no image scan')
+            if len(data) - pos > MAX_JPEG_TRAILING_BYTES:
+                raise ValueError('JPEG trailing data exceeds limit')
+            return data[:pos]
+        # Only length-delimited JPEG markers are accepted outside entropy data.
+        if not (0xc0 <= marker <= 0xcf or marker in (0xda, 0xdb, 0xdc, 0xdd, 0xde, 0xdf)
+                or 0xe0 <= marker <= 0xef or marker == 0xfe):
+            raise ValueError('Invalid JPEG segment')
+        if pos + 2 > len(data):
+            break
+        length = struct.unpack('>H', data[pos:pos + 2])[0]
+        if length < 2 or pos + length > len(data):
+            raise ValueError('Incomplete JPEG segment')
+        if marker in (0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7,
+                      0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf):
+            saw_frame = True
+        if marker == 0xda:
+            if not saw_frame:
+                raise ValueError('JPEG scan before frame')
+            saw_scan, in_scan = True, True
+        elif marker == 0xdc and was_in_scan:
+            in_scan = True  # DNL can occur inside an entropy-coded scan.
+        pos += length
+    raise ValueError('Incomplete JPEG')
+
+
+def normalized_image(data):
     if data.startswith(b'\x89PNG\r\n\x1a\n'):
         complete = data.endswith(b'\x00\x00\x00\x00IEND\xaeB`\x82')
+        fmt = 'png'
     elif data.startswith(b'\xff\xd8'):
-        complete = data.endswith(b'\xff\xd9')
+        return normalize_jpeg(data), 'jpeg'
     elif data.startswith((b'GIF87a', b'GIF89a')):
-        complete = data.endswith(b';')
+        complete, fmt = data.endswith(b';'), 'gif'
     elif data[:4] == b'RIFF' and data[8:12] == b'WEBP':
         complete = len(data) >= 12 and struct.unpack('<I', data[4:8])[0] + 8 == len(data)
+        fmt = 'webp'
     else:
-        complete = False
+        complete, fmt = False, 'unknown'
     if not complete:
         raise ValueError('Incomplete image')
+    return data, fmt
+
+
+def decode_image(data, timeout=10):
     result = subprocess.run(
         ['ffmpeg', '-hide_banner', '-loglevel', 'error', '-xerror',
          '-err_detect', 'explode', '-i', 'pipe:0', '-f', 'null', '-'],
-        input=data, capture_output=True, timeout=10,
+        input=data, capture_output=True, timeout=timeout,
     )
-    # FFmpeg can report recoverable EXIF/APP metadata warnings while decoding
-    # every pixel successfully. -xerror already makes decode failures fatal.
+    # -xerror makes decode failures fatal; recoverable metadata warnings are allowed.
     if result.returncode:
         raise ValueError('Image validation failed')
+
+
+def validate_image(data):
+    normalized, _ = normalized_image(data)
+    decode_image(normalized)
     return b'ok', 'validation'
+
+
+def normalize_image(data):
+    normalized, fmt = normalized_image(data)
+    decode_image(normalized)
+    return normalized, fmt
+
+
+def jpeg_xor_candidates(data, xor_size):
+    """Candidate keys from EOI pairs within a bounded XOR-encrypted suffix."""
+    if not 2 <= xor_size <= len(data):
+        raise ValueError('Invalid XOR suffix size')
+    start = max(len(data) - xor_size, len(data) - MAX_JPEG_TRAILING_BYTES - 2)
+    candidates = []
+    for pos in range(len(data) - 2, start - 1, -1):
+        key = data[pos] ^ 0xff
+        if data[pos + 1] ^ key == 0xd9 and key not in candidates:
+            candidates.append(key)
+            if len(candidates) > MAX_XOR_CANDIDATES:
+                raise ValueError('Too many JPEG XOR candidates')
+    return candidates
+
+
+def recover_jpeg_xor(payload):
+    """Input: LE u32 XOR size, LE u32 budget ms, AES-decoded image with XOR=0.
+
+    Return one byte only. No keys, image bytes or cache paths are logged or saved.
+    The legacy last-pair key gets priority only after structure and full decoding.
+    """
+    if len(payload) < 8:
+        raise ValueError('Invalid XOR recovery input')
+    xor_size, budget_ms = struct.unpack('<II', payload[:8])
+    data = payload[8:]
+    deadline = time.monotonic() + min(budget_ms / 1000, XOR_RECOVERY_SECONDS)
+    if not 2 <= xor_size <= len(data):
+        raise ValueError('Invalid XOR suffix size')
+
+    def validates(key):
+        candidate = data[:-xor_size] + bytes(b ^ key for b in data[-xor_size:])
+        normalized = normalize_jpeg(candidate)
+        if len(normalized) - 2 < len(data) - xor_size:
+            raise ValueError('JPEG EOI does not establish the XOR key')
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired('JPEG XOR recovery', 0)
+        decode_image(normalized, timeout=remaining)
+        return len(normalized)
+
+    fast_key = data[-2] ^ 0xff
+    if data[-1] ^ fast_key == 0xd9:
+        try:
+            if validates(fast_key) == len(data):
+                return bytes([fast_key]), 'xor'
+        except ValueError:
+            pass
+    candidates = jpeg_xor_candidates(data, xor_size)
+    valid = []
+    for key in candidates:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ValueError('JPEG XOR recovery timed out')
+        try:
+            validates(key)
+        except ValueError:
+            continue
+        valid.append(key)
+        if len(valid) > 1:
+            raise ValueError('Ambiguous JPEG XOR candidates')
+    if len(valid) != 1:
+        raise ValueError('No validated JPEG XOR candidate')
+    return bytes(valid), 'xor'
 
 # ============================================
 # WXGF → Image
@@ -234,7 +374,7 @@ def silk2mp3(data):
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: media-convert <wxgf2img|silk2mp3>", file=sys.stderr)
+        print("Usage: media-convert <wxgf2img|silk2mp3|validate-image|normalize-image|recover-jpeg-xor>", file=sys.stderr)
         sys.exit(1)
 
     mode = sys.argv[1]
@@ -247,6 +387,10 @@ def main():
     try:
         if mode == "validate-image":
             result, fmt = validate_image(data)
+        elif mode == "normalize-image":
+            result, fmt = normalize_image(data)
+        elif mode == "recover-jpeg-xor":
+            result, fmt = recover_jpeg_xor(data)
         elif mode == "wxgf2img":
             result, fmt = wxgf2img(data)
         elif mode == "silk2mp3":

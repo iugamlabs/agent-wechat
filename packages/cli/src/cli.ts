@@ -289,20 +289,22 @@ const contactsCmd = program
 
 contactsCmd
   .command("list")
-  .description("List all contacts from WeChat address book")
+  .description("List stored WeChat contacts (includes non-friends)")
+  .addOption(new Option("--local-type <number>", "Filter localType: 1=friend/official, 3=other contact, 5=openim").choices(["1", "3", "5"]))
   .option("-l, --limit <number>", "Maximum number of contacts", "200")
   .option("-o, --offset <number>", "Skip first N contacts", "0")
   .option("-j, --json", "Output as JSON")
   .action(async (opts) => {
-    await cmdContacts(getClient(), parseInt(opts.limit, 10), parseInt(opts.offset, 10), opts.json ?? false);
+    await cmdContacts(getClient(), parseInt(opts.limit, 10), parseInt(opts.offset, 10), opts.json ?? false, opts.localType === undefined ? undefined : Number(opts.localType));
   });
 
 contactsCmd
   .command("find <name>")
   .description("Search contacts by name")
+  .addOption(new Option("--local-type <number>", "Filter localType: 1=friend/official, 3=other contact, 5=openim").choices(["1", "3", "5"]))
   .option("-j, --json", "Output as JSON")
   .action(async (name: string, opts) => {
-    await cmdContactsFind(getClient(), name, opts.json ?? false);
+    await cmdContactsFind(getClient(), name, opts.json ?? false, opts.localType === undefined ? undefined : Number(opts.localType));
   });
 
 // ============================================
@@ -803,8 +805,8 @@ async function cmdChatOpen(client: WeChatClient, chatId: string, clearUnreads?: 
   }
 }
 
-async function cmdContacts(client: WeChatClient, limit: number = 200, offset: number = 0, json: boolean = false) {
-  const contacts = await client.listContacts(limit, offset);
+async function cmdContacts(client: WeChatClient, limit: number = 200, offset: number = 0, json: boolean = false, localType?: number) {
+  const contacts = await client.listContacts(limit, offset, localType);
 
   if (json) {
     console.log(JSON.stringify(contacts, null, 2));
@@ -820,18 +822,18 @@ async function cmdContacts(client: WeChatClient, limit: number = 200, offset: nu
 
   const maxIdLen = Math.max(10, ...contacts.map(c => c.username.length));
   const idHeader = "Username".padEnd(maxIdLen);
-  console.log(`${idHeader}  Type        Name`);
+  console.log(`${idHeader}  Type        LocalType  Name`);
   console.log("-".repeat(maxIdLen + 30));
   for (const c of contacts) {
     const id = c.username.padEnd(maxIdLen);
     const type = c.contactType.padEnd(10);
     const name = c.remark ? `${c.nickName} (${c.remark})` : c.nickName;
-    console.log(`${id}  ${type}  ${name}`);
+    console.log(`${id}  ${type}  ${String(c.localType).padEnd(9)}  ${name}`);
   }
 }
 
-async function cmdContactsFind(client: WeChatClient, name: string, json: boolean = false) {
-  const contacts = await client.findContacts(name);
+async function cmdContactsFind(client: WeChatClient, name: string, json: boolean = false, localType?: number) {
+  const contacts = await client.findContacts(name, localType);
 
   if (json) {
     console.log(JSON.stringify(contacts, null, 2));
@@ -846,7 +848,7 @@ async function cmdContactsFind(client: WeChatClient, name: string, json: boolean
   console.log(`Found ${contacts.length} matching contact(s):\n`);
   for (const c of contacts) {
     const name = c.remark ? `${c.nickName} (${c.remark})` : c.nickName;
-    console.log(`  ${c.username}: ${name} [${c.contactType}]`);
+    console.log(`  ${c.username}: ${name} [${c.contactType}, localType=${c.localType}]`);
   }
 }
 
