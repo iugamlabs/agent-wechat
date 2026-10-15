@@ -4,4 +4,4 @@ export type Contact = { username: string, nickName: string, remark?: string, ali
 /**
  * "individual", "official", "chatroom", or "openim"
  */
-contactType: string, };
+contactType: string, localType: number, };

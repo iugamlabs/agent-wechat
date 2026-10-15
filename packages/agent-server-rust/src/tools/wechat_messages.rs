@@ -74,7 +74,10 @@ fn clean_content(content: &str, msg_type: i32) -> String {
                 .unwrap_or_else(|| "[emoji]".to_string())
         }
         // Appmsg (type 49): handle subtypes
-        49 if content.contains("<msg>") => {
+        49 if content.contains("<msg") => {
+            if let Some(history) = super::merged_forward::render(content) {
+                return history;
+            }
             let title = extract_xml_tag(content, "title").unwrap_or_default();
             let appmsg_type = extract_xml_tag(content, "type")
                 .and_then(|t| t.parse::<i32>().ok())
@@ -93,6 +96,8 @@ fn clean_content(content: &str, msg_type: i32) -> String {
                     }
                     parts.join("\n")
                 }
+                // Merged forward / chat history (19)
+                19 => super::merged_forward::fallback_title(&title),
                 _ => {
                     if title.is_empty() {
                         content.to_string()
@@ -398,4 +403,48 @@ pub fn list_messages(
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clean_content_uses_structured_nested_forward_renderer() {
+        let xml = include_str!("../../tests/fixtures/merged-forward-nested.xml");
+        let content = clean_content(xml, 49);
+        assert!(content.contains("  Alice: First forwarded text"));
+        assert!(content.ends_with("  Carol: [Sticker]"));
+        assert!(!content.contains("\n[media]"));
+        assert_eq!(clean_content(xml, 49 | i32::MIN), content);
+    }
+
+    #[test]
+    fn ordinary_message_formatting_is_unchanged() {
+        assert_eq!(clean_content("plain text", 1), "plain text");
+        assert_eq!(clean_content("<msg><img aeskey='secret'/></msg>", 3), "");
+        assert_eq!(clean_content("<msg><emoji cdnurl=\"https://example.invalid/sticker\"/></msg>", 47), "https://example.invalid/sticker");
+        assert_eq!(clean_content("<msg><appmsg><title>report.pdf</title><type>6</type></appmsg></msg>", 49), "report.pdf");
+        assert_eq!(clean_content("<msg><appmsg><title>Quoted response</title><type>57</type></appmsg></msg>", 49), "Quoted response");
+    }
+
+    #[test]
+    fn link_summaries_and_reply_metadata_are_unchanged() {
+        for kind in [3, 4, 5] {
+            let xml = format!("<msg><appmsg><title>Link title</title><type>{kind}</type><des>Description</des><url>https://example.invalid/?a=1&amp;b=2</url></appmsg></msg>");
+            assert_eq!(clean_content(&xml, 49), "[Link] Link title\nDescription\nhttps://example.invalid/?a=1&b=2");
+        }
+        let xml = "<msg><appmsg><title>Reply</title><type>57</type><refermsg><displayname>Alice</displayname><content>Previous text</content></refermsg></appmsg></msg>";
+        let reply = extract_reply_info(xml, 49).unwrap();
+        assert_eq!(reply.sender.as_deref(), Some("Alice"));
+        assert_eq!(reply.content, "Previous text");
+        assert_eq!(clean_content(xml, 49), "Reply");
+    }
+
+    #[test]
+    fn invalid_forward_record_never_returns_raw_xml() {
+        let xml = "<msg><appmsg><title>History</title><type>19</type><recorditem>bad XML</recorditem></appmsg></msg>";
+        assert_eq!(clean_content(xml, 49), "History");
+        assert_eq!(clean_content("<msg><appmsg><type>19</type></appmsg></msg>", 49), "[Chat History unavailable]");
+    }
 }

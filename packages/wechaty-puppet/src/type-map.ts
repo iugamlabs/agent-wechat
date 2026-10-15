@@ -57,7 +57,8 @@ export function contactToContactPayload(contact: Contact): PUPPET.payloads.Conta
       : PUPPET.types.Contact.Individual,
     avatar: contact.smallHeadUrl ?? '',
     phone:  [],
-    friend: true,
+    friend: contact.localType === 1 && !contact.username.startsWith('gh_')
+      && contact.contactType !== 'official',
   }
 }
 

@@ -14,7 +14,9 @@ use crate::tools::wechat_db::{find_wechat_pid, list_account_dbs};
 use crate::tools::wechat_keys::{extract_keys_async, get_stored_keys, get_image_keys, store_keys};
 use crate::tools::wechat_media::{best_image_target, get_message_media, download_metadata, pending, ImageQuality};
 use crate::tools::media_download::{ensure_queued, current_process};
+use crate::tools::media_expiry::{expiry_timestamp, finish_expired};
 use crate::tools::wechat_messages;
+use crate::tools::wechat_media;
 use crate::sessions::manager::get_session;
 
 #[derive(Deserialize)]
@@ -137,6 +139,7 @@ pub async fn get_media(
                 format: String::new(),
                 filename: String::new(),
                 quality: None,
+                ..Default::default()
             })
         }
     };
@@ -150,6 +153,7 @@ pub async fn get_media(
                 format: String::new(),
                 filename: String::new(),
                 quality: None,
+                ..Default::default()
             })
         }
     };
@@ -158,6 +162,21 @@ pub async fn get_media(
         let db = get_db();
         get_stored_keys(&db, &session.id, &logged_in_user)
     };
+
+    // Stickers need only message metadata: return before image-key handling or
+    // lazy extraction of unrelated media database keys from the WeChat process.
+    let a = logged_in_user.clone();
+    let k = keys.clone();
+    let c = chat_id.clone();
+    let sticker = tokio::task::spawn_blocking(move || {
+        wechat_media::sticker_metadata(&a, &k, &c, local_id)
+    }).await.ok().flatten();
+    if let Some(metadata) = sticker {
+        return Json(match metadata {
+            Ok(sticker) => crate::tools::sticker_media::retrieve(&logged_in_user, sticker).await,
+            Err(error) => error.result(),
+        });
+    }
 
     // Lazy key extraction: if media_*.db files exist on disk without stored keys, extract them
     let on_disk = list_account_dbs(&logged_in_user);
@@ -185,7 +204,7 @@ pub async fn get_media(
     let request_keys = keys.clone();
     let request_chat = chat_id.clone();
     let request_image_keys = image_keys.clone();
-    let result = tokio::task::spawn_blocking(move || {
+    let mut result = tokio::task::spawn_blocking(move || {
         get_message_media(
             &logged_in_user,
             &keys,
@@ -203,7 +222,12 @@ pub async fn get_media(
         format: String::new(),
         filename: String::new(),
         quality: None,
+        ..Default::default()
     });
+    if result.media_type == "emoji" {
+        return Json(crate::tools::sticker_media::Failure::terminal("sticker_metadata_unavailable")
+            .result());
+    }
     if result.media_type == "unsupported"
         || (result.data.is_some()
             && (params.quality != ImageQuality::Best || result.media_type != "image"
@@ -218,6 +242,15 @@ pub async fn get_media(
         download_metadata(&metadata_account, &metadata_keys, &metadata_chat, local_id)
     ).await.ok().flatten();
     let Some(metadata) = metadata else { return Json(result); };
+    let expires_at = metadata["create_time"].as_i64().and_then(|created_at|
+        expiry_timestamp(metadata["content"].as_str().unwrap_or(""), created_at));
+    if finish_expired(&mut result, expires_at, chrono::Utc::now().timestamp()) {
+        if result.media_type == "expired" && metadata["local_type"] == (6i64 << 32 | 49) {
+            result.filename = wechat_messages::extract_xml_tag(metadata["content"].as_str().unwrap_or(""), "title")
+                .unwrap_or_default();
+        }
+        return Json(result);
+    }
     let advertised = best_image_target(metadata["content"].as_str().unwrap_or(""));
     let target_rank = if params.quality == ImageQuality::Best && metadata["local_type"] == 3 {
         image_quality_rank(Some(advertised))

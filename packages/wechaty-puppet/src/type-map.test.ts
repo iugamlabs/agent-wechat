@@ -1,10 +1,11 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import * as PUPPET from 'wechaty-puppet'
-import type { Chat, Message } from '@agent-wechat/shared'
+import type { Chat, Contact, Message } from '@agent-wechat/shared'
 import {
   wechatTypeToMessageType,
   chatToContactPayload,
+  contactToContactPayload,
   chatToRoomPayload,
   messageToPayload,
 } from './type-map.js'
@@ -228,5 +229,24 @@ describe('messageToPayload', () => {
 
     const payload = messageToPayload(msg, selfId)
     assert.equal('listenerId' in payload && payload.listenerId, 'wxid_friend')
+  })
+})
+
+describe('contactToContactPayload', () => {
+  const base: Contact = { username: 'peer', nickName: 'Alice', contactType: 'individual', localType: 1 }
+  it('distinguishes friends from other stored contacts', () => {
+    assert.equal(contactToContactPayload(base).friend, true)
+    assert.equal(contactToContactPayload({ ...base, localType: 3 }).friend, false)
+  })
+  it('keeps official accounts out of friends', () => {
+    const payload = contactToContactPayload({ ...base, username: 'gh_example', contactType: 'official' })
+    assert.equal(payload.type, PUPPET.types.Contact.Official)
+    assert.equal(payload.friend, false)
+    assert.equal(contactToContactPayload({ ...base, username: 'gh_example' }).friend, false)
+  })
+  it('preserves the existing openim contact type mapping', () => {
+    const payload = contactToContactPayload({ ...base, username: 'peer@openim', contactType: 'openim', localType: 5 })
+    assert.equal(payload.type, PUPPET.types.Contact.Individual)
+    assert.equal(payload.friend, false)
   })
 })

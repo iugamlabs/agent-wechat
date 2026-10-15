@@ -10,3 +10,6 @@ pub mod wechat_keys;
 pub mod wechat_messages;
 pub mod wechat_media;
 pub mod media_download;
+pub mod media_expiry;
+mod merged_forward;
+pub mod sticker_media;
