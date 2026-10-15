@@ -1,5 +1,13 @@
 # @agent-wechat/wechaty-gateway
 
+## 0.17.0
+
+### Patch Changes
+
+- Updated dependencies [[`ff013fd`](https://github.com/thisnick/agent-wechat/commit/ff013fd0665d34c11197c11218b7de0619feef68)]:
+  - @agent-wechat/shared@0.4.0
+  - @agent-wechat/wechaty-puppet@0.17.0
+
 ## 0.16.0
 
 ### Patch Changes
