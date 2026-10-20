@@ -8,7 +8,7 @@ The local checkout used to establish this guide is based on upstream commit `96c
 
 ## Maintained changes
 
-The fork is maintained as the WeChat provider foundation for `iugam-wechat`. Release tags follow `v<upstream-version>-iugam.<N>` (for example `v0.15.1-iugam.1`); see [the version policy](./release.md#fork-version-policy). This is a maintenance and release convention, not an implemented runtime feature or a claim that a fork release already exists.
+The fork is maintained as the WeChat provider foundation for `iugam-wechat`. Release tags follow `v<upstream-version>-iugam.<N>` (for example `v0.16.0-iugam.1`); see [the version policy](./release.md#fork-version-policy). This is a maintenance and release convention, not an implemented runtime feature or a claim that a fork release already exists.
 
 The following reusable fixes are maintained locally pending upstream integration. The entries describe source changes; release and downstream compatibility verification are tracked separately.
 
@@ -17,7 +17,7 @@ The following reusable fixes are maintained locally pending upstream integration
 - **Range:** Previous base `96c2e90c497d999bf5189a134a9b3b293731f42e` (`v0.15.1`). Integrated `21fe1185a01ec7f90864a529d9bb94da648255d5` (`v0.16.0`). This also includes fork commits `ff013fd` and `5c734dc`, which were not on fork `main` yet.
 - **Incoming behavior:** Nested Send composer selection, explicit media expiry, server-owned type-47 sticker cache, merged-forward text, OpenClaw 2026.10 loading and channel ingress, Node 24, and the npm publish CI fixes.
 - **Conflict decision:** `wechat_media.rs` decode and missing-byte failures stay `pending()`. Upstream had only added `..Default::default()` to the old empty `type: "image"` result. The CLI test script runs both the upstream media-status tests and the fork contacts client test. `ia/types.rs`, `cli.ts`, and the CI workflows merged with both sides' additions.
-- **Versions:** The tree carries upstream package version `0.16.0` from that integration. No fork release tag was created. The next fork release identifier is `v0.16.0-iugam.1`.
+- **Versions:** The tree carries upstream package version `0.16.0` from that integration. The fork release tag for this base is `v0.16.0-iugam.1` on `f5c7921`.
 - **Downstream:** `iugam-wechat` must map `type: "expired"` to unavailable and keep polling `pending`. Confirmed expiry is not a retryable read.
 
 Use the following fields for each entry:
@@ -38,7 +38,7 @@ Record each synchronization's full range, conflict decisions, and validation in 
 ## Contact local types (maintained)
 
 - **Rationale:** Broad `contactType=individual` cannot distinguish friends from other stored contacts. Preserve raw `localType`, without replacing the existing categories or expanding contact queries to chatrooms/system accounts.
-- **Source:** This change; see [contact investigation and implementation](./2026-10-05-contacts-local-type-fix.md). No upstream backport source.
+- **Source:** This change; see [contact investigation and implementation](./iugam-2026-10-05-contacts-local-type-fix.md). No upstream backport source.
 - **Affected paths:** Rust `ia/types.rs`, `router/contacts.rs`, `tools/wechat_contacts.rs`; shared generated `Contact` and client; CLI contact commands; Wechaty type mapping and polling cache; API reference.
 - **Compatibility:** Add numeric `localType` and optional `localType=1|3|5` query filters to both contact endpoints. Unsupported filters return HTTP 400 before session/database access. Existing client positional arguments and default scope remain. CLI supports `--local-type` and displays raw types. Wechaty uses type 1 excluding official accounts for `friend`, and polling preserves that result; chat-only fallback retains its existing behavior. `iugam-wechat` consumers must use raw type rather than broad account category to infer friendship, and refresh any incorrect cache. No friendship request API or database migration is added. A new Wechaty adapter expects the updated provider's `localType` field; older servers do not supply it.
 - **Release:** Pending. Integrated on upstream `0.16.0` at `21fe1185a01ec7f90864a529d9bb94da648255d5`; fork release suffix remains governed by the release policy.
@@ -48,7 +48,7 @@ Record each synchronization's full range, conflict decisions, and validation in 
 ## JPEG trailing data and XOR recovery (maintained)
 
 - **Rationale:** JPEG EOI may precede trailing bytes, causing the legacy last-pair XOR inference and strict end-of-file validation to reject downloaded images.
-- **Source:** This change; see [media investigation and implementation](./2026-10-05-jpeg-tail-xor-fix.md). No upstream backport source.
+- **Source:** This change; see [media investigation and implementation](./iugam-2026-10-05-jpeg-tail-xor-fix.md). No upstream backport source.
 - **Affected paths:** Rust `tools/wechat_media.rs`; `docker/tools/media-convert.py`; synthetic fixtures and Rust/Python regressions; CI codec dependencies and path filters.
 - **Compatibility:** Saved XOR retains priority. JPEG inference validates the legacy end-pair candidate first, then scans at most 4096 trailing bytes plus the EOI pair, accepts at most 32 distinct candidates, and requires a unique structurally valid, fully decoded fallback. Recovery shares a three-second decoder budget across the current image and at most two sibling thumbnails, prioritizing the corresponding thumbnail; directory inspection is limited to 64 entries. EOI must be inside the XOR suffix to establish its key. JPEG normalization skips metadata, entropy stuffing and restart markers, finds structural EOI and strips bounded trailing bytes in memory before strict FFmpeg decoding. No cache files are rewritten. Missing or invalid image bytes return `pending` instead of an empty successful image. A message whose own explicit expiry timestamp has elapsed, and which has no cached bytes, returns upstream `type: "expired"` with `retryable: false` before any native download. Quality selection, native transfer deduplication/wait policy and GUI behavior are unchanged. Candidate server binaries and the updated `media-convert.py` must deploy together. `iugam-wechat` should keep polling `pending` and treat `expired` as unavailable. Its exhausted-retry UI issue is outside this fix.
 - **Release:** Pending, on upstream `0.16.0` at `21fe1185a01ec7f90864a529d9bb94da648255d5`.

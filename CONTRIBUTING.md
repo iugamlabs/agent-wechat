@@ -1,6 +1,6 @@
 # Contributing to the iugamlabs fork
 
-This repository is maintained at [iugamlabs/agent-wechat](https://github.com/iugamlabs/agent-wechat), with [thisnick/agent-wechat](https://github.com/thisnick/agent-wechat) as upstream. Fork features and reviewed upstream changes meet on fork `main`. Read [AGENTS.md](./AGENTS.md) for runtime boundaries and [fork differences](./dev-notes/fork-differences.md) for behavior that upstream integration must preserve. `CLAUDE.md` is a symlink to `AGENTS.md`; keep that single source of agent instructions.
+This repository is maintained at [iugamlabs/agent-wechat](https://github.com/iugamlabs/agent-wechat), with [thisnick/agent-wechat](https://github.com/thisnick/agent-wechat) as upstream. Fork features and reviewed upstream changes meet on fork `main`. Read [AGENTS.md](./AGENTS.md) for runtime boundaries and [fork differences](./dev-notes/iugam-fork-differences.md) for behavior that upstream integration must preserve. `CLAUDE.md` is a symlink to `AGENTS.md`; keep that single source of agent instructions.
 
 ## Provider role and compatibility
 
@@ -8,7 +8,7 @@ This fork serves as the WeChat provider foundation for the downstream `iugam-wec
 
 When a change affects behavior used by that provider, record its API, configuration, media, or deployment implications in the PR and fork differences document. Verify affected provider integration against the candidate fork build before declaring it compatible. If the downstream project is unavailable for verification, report that limit explicitly. Public documentation refers to the downstream project by name; local checkout paths, private repository links, and deployment details stay outside this repository.
 
-Fork releases use `v<upstream-version>-iugam.<N>`, for example `v0.15.1-iugam.1`. Custom releases on the same upstream base increment `N`; moving to a new integrated upstream release resets `N` to `1`. Follow [the version policy](./dev-notes/release.md#fork-version-policy) for package versions, artifact names, and release tooling requirements. Keep the upstream base and fork revision explicit when resolving version conflicts.
+Fork releases use `v<upstream-version>-iugam.<N>`, for example `v0.16.0-iugam.1`. Custom releases on the same upstream base increment `N`; moving to a new integrated upstream release resets `N` to `1`. Follow [the version policy](./dev-notes/release.md#fork-version-policy) for package versions, artifact names, and release tooling requirements. Keep the upstream base and fork revision explicit when resolving version conflicts.
 
 ## Remotes and branches
 
@@ -45,7 +45,7 @@ These are local Git settings, not repository policy enforcement. Use explicit de
 2. Keep changes that could be contributed upstream separate from fork-specific policy, integration, and deployment changes. Prefer small commits and existing extension points; avoid broad file moves or formatting changes mixed with behavior changes.
 3. Preserve existing API behavior where possible. Document intentional compatibility changes and update Rust-exported types with `pnpm generate-types`.
 4. Add meaningful regression checks for changed behavior and an appropriate changeset for user-facing or package changes. Documentation-only edits do not need a changeset.
-5. Update [fork differences](./dev-notes/fork-differences.md) when an implemented change introduces or alters fork behavior. Record why it exists, affected paths, compatibility implications, and how to verify it. Keep proposals separate from implemented features.
+5. Update [fork differences](./dev-notes/iugam-fork-differences.md) when an implemented change introduces or alters fork behavior. Record why it exists, affected paths, compatibility implications, and how to verify it. Keep proposals separate from implemented features.
 6. Open a PR against `iugamlabs/agent-wechat:main` describing resulting behavior and validation. An upstream contribution is a separate PR against `thisnick/agent-wechat`; prepare it from upstream's branch so it does not include unrelated fork changes.
 
 ## Choosing when to synchronize

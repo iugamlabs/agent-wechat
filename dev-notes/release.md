@@ -25,19 +25,21 @@ Until fork distribution is configured, build from the checkout with `pnpm build`
 
 This fork is the WeChat provider foundation for `iugam-wechat`. Its release identifier combines the upstream base version with the current customization revision:
 
+The current upstream base is `0.16.0` (`21fe1185a01ec7f90864a529d9bb94da648255d5`). The first fork release on this base is `v0.16.0-iugam.1`.
+
 | Identifier | Example |
 | --- | --- |
-| Git tag / release title | `v0.15.1-iugam.1` |
-| Package version / Rust crate version | `0.15.1-iugam.1` |
-| Versioned Docker image tag | `0.15.1-iugam.1` |
-| Server binary asset | `agent-server-0.15.1-iugam.1-linux-amd64` |
-| Docker tools asset | `docker-tools-0.15.1-iugam.1.tar.gz` |
+| Git tag / release title | `v0.16.0-iugam.1` |
+| Package version / Rust crate version | `0.16.0-iugam.1` |
+| Versioned Docker image tag | `0.16.0-iugam.1` |
+| Server binary asset | `agent-server-0.16.0-iugam.1-linux-amd64` |
+| Docker tools asset | `docker-tools-0.16.0-iugam.1.tar.gz` |
 
 Version rules:
 
 1. `<upstream-version>` identifies the upstream release used as the fork base. Record its exact upstream commit SHA and the fork commit in release notes; separately identify any additional upstream commits or backports.
-2. `N` is a positive integer starting at `1`, without leading zeroes. Increment it for each new published fork revision on the same upstream base: `v0.15.1-iugam.1` → `v0.15.1-iugam.2`. Development commits do not each require a version increment.
-3. After integrating and validating a new upstream release, use its version and restart the customization revision at `1`: `v0.15.1-iugam.2` → `v0.15.2-iugam.1`. Do not advance the upstream component merely to represent a fork feature or fix.
+2. `N` is a positive integer starting at `1`, without leading zeroes. Increment it for each new published fork revision on the same upstream base: `v0.16.0-iugam.1` → `v0.16.0-iugam.2`. Development commits do not each require a version increment.
+3. After integrating and validating a new upstream release, use its version and restart the customization revision at `1`: `v0.16.0-iugam.2` → `v<new-upstream>-iugam.1`. Do not advance the upstream component merely to represent a fork feature or fix. Do not use `-alpha.N` or a bare upstream version. The release tag for this base is `v0.16.0-iugam.1` on `f5c7921afc4ff36a3ac96fd82ee44828452084cd`.
 4. Preserve the fork suffix when upstream changes version files. Keep the packages in the existing Changesets fixed release group and the Rust server's `Cargo.toml` / `Cargo.lock` aligned with the chosen fork version; package version strings omit `v`.
 5. Published versions and their artifacts are immutable. Release changed content under a new customization revision.
 
