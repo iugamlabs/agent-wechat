@@ -111,6 +111,32 @@ fn clean_content(content: &str, msg_type: i32) -> String {
     }
 }
 
+/// Read only this message's subtype. Database metadata precedes bounded XML.
+fn app_message_type(local_type: i64, content: &str) -> Option<i32> {
+    if (local_type as i32 & 0x7fffffff) != 49 {
+        return None;
+    }
+    let subtype = local_type >> 32;
+    if subtype > 0 && subtype <= i32::MAX as i64 {
+        return Some(subtype as i32);
+    }
+    if content.len() > 1024 * 1024 { return None; }
+    let document = roxmltree::Document::parse_with_options(content, roxmltree::ParsingOptions {
+        allow_dtd: false, nodes_limit: 4096, ..Default::default()
+    }).ok()?;
+    let root = document.root_element();
+    if !root.has_tag_name("msg") || root.tag_name().namespace().is_some() { return None; }
+    let mut apps = root.children().filter(|n| n.has_tag_name("appmsg") && n.tag_name().namespace().is_none());
+    let app = apps.next()?;
+    if apps.next().is_some() { return None; }
+    let mut fields = app.children().filter(|n| n.has_tag_name("type") && n.tag_name().namespace().is_none());
+    let field = fields.next()?;
+    if fields.next().is_some() || field.children().any(|n| n.is_element()) { return None; }
+    let value: String = field.children().filter(|n| n.is_text()).filter_map(|n| n.text()).collect();
+    let subtype = value.trim().parse::<i32>().ok()?;
+    (subtype > 0).then_some(subtype)
+}
+
 /// Extract reply info from type 49 (appmsg) messages with <refermsg>.
 fn extract_reply_info(content: &str, msg_type: i32) -> Option<ReplyInfo> {
     let base = msg_type & 0x7FFFFFFF;
@@ -299,10 +325,8 @@ pub fn list_messages(
                 .get("server_id")
                 .and_then(|v| v.as_i64())
                 .unwrap_or(0);
-            let msg_type = row
-                .get("local_type")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0) as i32;
+            let local_type = row.get("local_type").and_then(|v| v.as_i64()).unwrap_or(0);
+            let msg_type = local_type as i32;
 
             let hex_content = row
                 .get("hex_content")
@@ -329,6 +353,8 @@ pub fn list_messages(
             } else {
                 raw_content
             };
+
+            let app_msg_type = app_message_type(local_type, &body);
 
             // Extract reply info before cleaning (needs raw XML)
             let reply = extract_reply_info(&body, msg_type);
@@ -395,6 +421,7 @@ pub fn list_messages(
                 sender,
                 sender_name,
                 msg_type,
+                app_msg_type,
                 content,
                 timestamp,
                 is_mentioned,
@@ -408,6 +435,33 @@ pub fn list_messages(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn own_app_subtype_survives_display_fallback_and_ignores_nested_metadata() {
+        for subtype in [3, 4, 5, 6, 19, 57] {
+            let xml = format!("<msg><appmsg><type>{subtype}</type><title>same.pdf</title><recorditem>bad</recorditem></appmsg></msg>");
+            assert_eq!(app_message_type(49, &xml), Some(subtype));
+            assert_eq!(app_message_type(49 | i32::MIN as i64, &xml), Some(subtype));
+            assert_eq!(app_message_type(1, &xml), None);
+        }
+        assert_eq!(app_message_type((19_i64 << 32) | 49, "broken XML"), Some(19));
+        assert_eq!(app_message_type((6_i64 << 32) | 49, "<msg><appmsg><type>19</type></appmsg></msg>"), Some(6));
+        for xml in ["<msg><appmsg><refermsg><type>19</type></refermsg></appmsg></msg>", "<msg><appmsg><type>6</type><type>19</type></appmsg></msg>", "bad XML", "<msg/>"] {
+            assert_eq!(app_message_type(49, xml), None);
+        }
+        let xml = "<msg><appmsg><type>19</type><title>same.pdf</title><recorditem>bad</recorditem></appmsg></msg>";
+        assert_eq!(clean_content(xml, 49), "same.pdf");
+        assert_eq!(app_message_type(49, xml), Some(19));
+    }
+
+    #[test]
+    fn optional_subtype_roundtrips_legacy_messages() {
+        let old = serde_json::json!({"localId": 1, "serverId": 2, "chatId": "test", "type": 49, "content": "title", "timestamp": "2026-10-20T00:00:00Z"});
+        let mut message: Message = serde_json::from_value(old).unwrap();
+        assert!(!serde_json::to_value(&message).unwrap().as_object().unwrap().contains_key("appMsgType"));
+        message.app_msg_type = Some(19);
+        assert_eq!(serde_json::to_value(&message).unwrap()["appMsgType"], 19);
+    }
 
     #[test]
     fn clean_content_uses_structured_nested_forward_renderer() {
