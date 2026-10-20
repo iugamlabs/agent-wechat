@@ -133,3 +133,10 @@ uv run --script scripts/publish-image.py --tag v0.16.0-iugam.2 --arch amd64
 ```
 
 The Python script also updates `latest`; neither npm nor the inherited GHCR workflows are part of this release. Downstream providers should use subtype 6 for files, 19 for forwarded histories and 57 for quoted replies. Older responses may omit this field. An API health check does not prove live-account message retrieval.
+
+Published on 2026-10-20 from `a74ad1a329ed`: both the CCR version tag and `latest` resolve to
+`sha256:a4057a341e7bad95e161b46c8a9651c516b757c152dfeb77b9f944f57e66b890`.
+The verified runtime platform is linux/amd64. Rust regressions (104), CLI (5), Wechaty (24),
+workspace build/typecheck, and a separate empty-container API check passed. Downstream
+iugam-wechat also verified an isolated Manager `.1` to `.2` container replacement with
+volume contents and credentials retained. Live-account sends were not part of validation.

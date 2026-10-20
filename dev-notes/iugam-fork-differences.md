@@ -59,5 +59,5 @@ Record each synchronization's full range, conflict decisions, and validation in 
 
 - Adds optional `appMsgType` to message responses, generated shared types and the shared schema. Own database subtype metadata takes priority; bounded direct-root XML is the fallback. Embedded history and reply metadata cannot supply the outer subtype.
 - Lets downstream iugam-wechat distinguish type-49 files (6), forwarded histories (19), links (3/4/5), and quoted replies (57), including title-only fallback. Existing display text and fields stay compatible; absent metadata remains absent.
-- Release candidate: `0.16.0-iugam.2`, based on upstream `21fe1185a01ec7f90864a529d9bb94da648255d5`. CCR image publication and downstream rollout are verified separately.
+- Released: `0.16.0-iugam.2`, based on upstream `21fe1185a01ec7f90864a529d9bb94da648255d5`. The amd64 CCR image was published and downstream provider regressions and isolated Manager upgrade checks passed; see the release record.
 - Regression checks: own subtype extraction, nested metadata rejection, database precedence, malformed/title-only forwards and old/new JSON roundtrips in `tools/wechat_messages.rs`; shared schema/type generation, build and typecheck.
