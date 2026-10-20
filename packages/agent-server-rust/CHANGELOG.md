@@ -1,5 +1,15 @@
 # @agent-wechat/agent-server
 
+## 0.17.0
+
+### Minor Changes
+
+- [`ff013fd`](https://github.com/thisnick/agent-wechat/commit/ff013fd0665d34c11197c11218b7de0619feef68) Thanks [@Deali-Axy](https://github.com/Deali-Axy)! - Return raw localType alongside contactType and support validated localType filters for contact lists and searches. Expose filters and raw types in the client and CLI, and distinguish friends from other stored contacts in Wechaty payloads.
+
+### Patch Changes
+
+- [`5c734dc`](https://github.com/thisnick/agent-wechat/commit/5c734dc3b6530ea4ebb9e67e4f6e91485b5a4585) Thanks [@Deali-Axy](https://github.com/Deali-Axy)! - Recover missing image XOR parameters using bounded JPEG candidates with strict decoding. Normalize structurally verified JPEG trailing data in memory and return pending when no validated image bytes are available.
+
 ## 0.16.0
 
 ## 0.15.6

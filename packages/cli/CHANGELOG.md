@@ -1,5 +1,11 @@
 # @agent-wechat/cli
 
+## 0.17.0
+
+### Minor Changes
+
+- [`ff013fd`](https://github.com/thisnick/agent-wechat/commit/ff013fd0665d34c11197c11218b7de0619feef68) Thanks [@Deali-Axy](https://github.com/Deali-Axy)! - Return raw localType alongside contactType and support validated localType filters for contact lists and searches. Expose filters and raw types in the client and CLI, and distinguish friends from other stored contacts in Wechaty payloads.
+
 ## 0.16.0
 
 ## 0.15.6
