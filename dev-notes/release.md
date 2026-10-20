@@ -10,7 +10,7 @@ Current distribution settings in the checked-in implementation:
 | --- | --- | --- |
 | npm package identity | Public packages retain the `@agent-wechat` names. | Decide fork-owned package names and versions, update dependencies and installation instructions, and configure publishing access. Review OpenClaw package basename/plugin ID compatibility before renaming the extension. |
 | CLI container image and update downloads | `packages/cli/src/cli.ts` uses `ghcr.io/thisnick/agent-wechat` and binary assets from `thisnick/agent-wechat` releases. | Update and verify both destinations before using the CLI to distribute fork builds. |
-| Compose image | `docker-compose.yml` still points at the upstream GHCR image until the CCR publish is verified. | Then pin `ccr.ccs.tencentyun.com/deali/agent-wechat:<version>`. |
+| Compose image | The inherited standalone Compose still points at upstream GHCR. | Downstream deployments explicitly pin `ccr.ccs.tencentyun.com/deali/agent-wechat:<version>`. |
 | Release and rebuild workflows | GHCR names derive from `github.repository`, while npm names come from package manifests. | Review these destinations separately; changing the GitHub owner does not change npm package ownership. |
 | Changesets and package metadata | `.changeset/config.json` and public package repository fields refer to `thisnick/agent-wechat`. | Update repository attribution for fork release notes and package source links while retaining upstream credit. |
 | Documentation hosting | `docs/astro.config.mjs` points to `thisnick.github.io` and the upstream repository. | Configure a fork site and verify its deployment before replacing the upstream documentation link. |
@@ -121,3 +121,15 @@ Once configured, delete the `NPM_TOKEN` secret from GitHub repo settings. The wo
 **Note**: Trusted publishing can only be configured for packages that already exist on npm. For brand-new packages, the first publish must use a token.
 
 The GHCR paths in the current release and rebuild workflows already derive from `github.repository`. Fork preparation also needs to address the CLI's upstream download addresses and Compose/documentation examples listed above.
+
+## 0.16.0-iugam.2 image release
+
+This release adds optional message `appMsgType` metadata without changing the upstream 0.16.0 base. The fixed package group and Rust crate use the full fork version; the private shared package keeps its existing package version. Generate shared types before building.
+
+For an amd64 CCR release, verify the source commit, local subtype regressions and a separate empty-container startup, then tag that commit `v0.16.0-iugam.2` and run:
+
+```bash
+uv run --script scripts/publish-image.py --tag v0.16.0-iugam.2 --arch amd64
+```
+
+The Python script also updates `latest`; neither npm nor the inherited GHCR workflows are part of this release. Downstream providers should use subtype 6 for files, 19 for forwarded histories and 57 for quoted replies. Older responses may omit this field. An API health check does not prove live-account message retrieval.

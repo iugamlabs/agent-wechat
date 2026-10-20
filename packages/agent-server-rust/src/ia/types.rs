@@ -427,6 +427,10 @@ pub struct Message {
     #[serde(rename = "type")]
     #[ts(rename = "type")]
     pub msg_type: i32,
+    // Own app-message subtype; absent for non-app messages and unknown metadata.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub app_msg_type: Option<i32>,
     pub content: String,
     pub timestamp: String,
     #[serde(skip_serializing_if = "Option::is_none")]

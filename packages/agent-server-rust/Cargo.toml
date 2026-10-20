@@ -1,6 +1,6 @@
 [package]
 name = "agent-server"
-version = "0.16.0"
+version = "0.16.0-iugam.2"
 edition = "2021"
 
 [dependencies]
