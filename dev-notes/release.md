@@ -10,16 +10,24 @@ Current distribution settings in the checked-in implementation:
 | --- | --- | --- |
 | npm package identity | Public packages retain the `@agent-wechat` names. | Decide fork-owned package names and versions, update dependencies and installation instructions, and configure publishing access. Review OpenClaw package basename/plugin ID compatibility before renaming the extension. |
 | CLI container image and update downloads | `packages/cli/src/cli.ts` uses `ghcr.io/thisnick/agent-wechat` and binary assets from `thisnick/agent-wechat` releases. | Update and verify both destinations before using the CLI to distribute fork builds. |
-| Compose image | `docker-compose.yml` uses the upstream GHCR image. | Select a verified fork image for fork deployments. |
+| Compose image | `docker-compose.yml` still points at the upstream GHCR image until the CCR publish is verified. | Then pin `ccr.ccs.tencentyun.com/deali/agent-wechat:<version>`. |
 | Release and rebuild workflows | GHCR names derive from `github.repository`, while npm names come from package manifests. | Review these destinations separately; changing the GitHub owner does not change npm package ownership. |
 | Changesets and package metadata | `.changeset/config.json` and public package repository fields refer to `thisnick/agent-wechat`. | Update repository attribution for fork release notes and package source links while retaining upstream credit. |
 | Documentation hosting | `docs/astro.config.mjs` points to `thisnick.github.io` and the upstream repository. | Configure a fork site and verify its deployment before replacing the upstream documentation link. |
 
-Before enabling fork publishing, review `.github/workflows/release.yml`, `docker-rebuild.yml`, and `deploy-docs.yml`, along with the fork's Actions settings, publishing access, and Pages configuration. The release workflow runs on pushes to `main`; the rebuild workflow is manually triggered. Keep publishing workflows disabled until their destinations and identities are configured. Actual remote Actions settings and artifact availability must be checked separately from the workflow files.
+The fork container registry is `ccr.ccs.tencentyun.com/deali/agent-wechat`. Publish from a machine already logged in with `docker login ccr.ccs.tencentyun.com`:
+
+```bash
+pnpm publish:image
+```
+
+`scripts/publish-image.sh` builds one architecture, defaults to `linux/amd64`, and pushes the newest local `v*-iugam.*` tag with the leading `v` removed. It also moves `:latest` to that image. The version tag is refused when it already exists, or when `docker/` or `packages/agent-server-rust` differ from the tag. This host publishes `amd64` only. An `arm64` image is a separate build and is not part of the `amd64` tag.
+
+Do not enable `.github/workflows/release.yml` or `docker-rebuild.yml` for this registry. Those workflows push GHCR and, on `main`, also try to publish the `@agent-wechat/*` npm packages. Fork image publishing stays on the local script until a dedicated workflow has its own CCR credentials and does not publish npm. The CLI still pulls `ghcr.io/thisnick/agent-wechat` plus the package version (`0.16.0`), so `wx up` does not select this registry. Pin the CCR version tag, or `latest`, from Compose or `AGENT_IMAGE`.
 
 Continue adding changesets for user-facing changes and follow the fork version policy below. Do not reuse an upstream artifact's identity for different fork content.
 
-Until fork distribution is configured, build from the checkout with `pnpm build` and the appropriate `pnpm build:image:amd64` or `pnpm build:image:arm64` command. The image script creates local tags `agent-wechat:amd64` and `agent-wechat:arm64`. The CLI currently has no `wx up --image` override; use an isolated container configuration with an explicit local image and separate volumes, ports, and credentials, then point the local CLI at it with `AGENT_WECHAT_URL` and `AGENT_WECHAT_TOKEN`. Build output alone does not update a running container.
+Local image builds stay `pnpm build:image:amd64` or `pnpm build:image:arm64`. Those commands create `agent-wechat:amd64` and `agent-wechat:arm64` and do not push. The CLI has no `wx up --image` override. For an isolated container, pass an explicit image and separate volumes, ports, and credentials, then point the local CLI at it with `AGENT_WECHAT_URL` and `AGENT_WECHAT_TOKEN`. A local build does not update a running container.
 
 ## Fork version policy
 
