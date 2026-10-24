@@ -3,7 +3,7 @@ use crate::db::{get_db, queries};
 use crate::ia::actions;
 use crate::ia::types::*;
 use crate::tools::wechat_db::{find_account_dir, find_wechat_pid};
-use crate::tools::wechat_keys::{extract_keys_async, needs_key_extraction, store_keys};
+use crate::tools::wechat_keys::{prepare_core_data_async, core_data_ready, store_keys};
 use rusqlite::params;
 
 pub struct LoginPlan;
@@ -265,7 +265,7 @@ async fn handle_detecting_user(
             }
             queries::update_session_logged_in_user(&db, session_id, Some(&acct));
 
-            if !needs_key_extraction(&db, session_id, &acct) {
+            if core_data_ready(&db, session_id, &acct) {
                 plan_state.phase = LoginPhase::Done;
                 return Some(SelectedAction {
                     action: actions::sequence(vec![
@@ -310,8 +310,9 @@ async fn handle_detecting_user(
             action: actions::sequence(vec![
                 Action::Emit {
                     event: SubscriptionEvent {
-                        event_type: "login_success".to_string(),
-                        data: std::collections::HashMap::new(),
+                        event_type: "error".to_string(),
+                        data: [("message".into(),serde_json::json!("Could not determine current WeChat identity")),
+                            ("code".into(),serde_json::json!("identity_unavailable")),("retryable".into(),serde_json::json!(true))].into_iter().collect(),
                     },
                 },
                 actions::wait_short(),
@@ -341,7 +342,7 @@ async fn handle_extracting_keys(
     };
 
     if let (Some(pid), Some(acct)) = (wechat_pid, plan_state.account_dir.clone()) {
-        match extract_keys_async(pid).await {
+        match prepare_core_data_async(pid).await {
             keys if !keys.is_empty() => {
                 let db = get_db();
                 store_keys(&db, session_id, &acct, &keys);
@@ -353,6 +354,15 @@ async fn handle_extracting_keys(
     }
 
     plan_state.phase = LoginPhase::Done;
+    let ready=plan_state.account_dir.as_ref().is_some_and(|account| {
+        let db=get_db(); core_data_ready(&db,session_id,account)
+    });
+    if !ready {
+        return Some(SelectedAction { action:Action::Emit { event:SubscriptionEvent {
+            event_type:"error".into(), data:[("message".into(),serde_json::json!("WeChat session data is not ready")),
+                ("code".into(),serde_json::json!("session_preparation_failed")),("retryable".into(),serde_json::json!(true))].into_iter().collect()
+        }}, frame });
+    }
     Some(SelectedAction {
         action: actions::sequence(vec![
             Action::Emit {

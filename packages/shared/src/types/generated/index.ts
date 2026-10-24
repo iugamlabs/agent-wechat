@@ -1,6 +1,7 @@
 // Auto-generated barrel file — do not edit manually
 // Generated from packages/agent-server-rust/src/ia/types.rs via ts-rs
 
+export type { AuthSnapshot } from "./AuthSnapshot.js";
 export type { Bounds } from "./Bounds.js";
 export type { Chat } from "./Chat.js";
 export type { Contact } from "./Contact.js";

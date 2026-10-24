@@ -475,7 +475,12 @@ pub struct SettingsState {
 #[ts(export)]
 pub enum LoginSubscriptionEvent {
     #[serde(rename = "status")]
-    Status { message: String },
+    Status {
+        message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        phase: Option<String>,
+    },
     #[serde(rename = "qr")]
     Qr {
         #[serde(rename = "qrData")]
@@ -505,7 +510,39 @@ pub enum LoginSubscriptionEvent {
     #[serde(rename = "login_timeout")]
     LoginTimeout,
     #[serde(rename = "error")]
-    Error { message: String },
+    Error {
+        message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        code: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        retryable: Option<bool>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all="camelCase")]
+#[ts(export)]
+pub struct AuthSnapshot {
+    pub status: String,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    #[ts(optional)]
+    pub logged_in_user: Option<String>,
+    pub phase: String,
+    pub data_ready: bool,
+    pub protocol_version: u32,
+    pub stale: bool,
+    pub updated_at: String,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    #[ts(optional)]
+    pub observed_at: Option<String>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    #[ts(optional)]
+    pub attempt_id: Option<String>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    #[ts(optional)]
+    pub error_code: Option<String>,
 }
 
 // ============================================

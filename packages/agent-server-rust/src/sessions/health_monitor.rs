@@ -66,6 +66,7 @@ pub fn spawn_health_monitor() {
         let mut restart_count: u32 = 0;
         let mut window_start = Instant::now();
         let mut waiting_restart_since: Option<Instant> = None;
+        let mut last_core_prepare: Option<Instant> = None;
 
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(SCAN_INTERVAL_SECS)).await;
@@ -96,6 +97,7 @@ pub fn spawn_health_monitor() {
                     pid
                 }
                 None => {
+                    crate::auth_snapshot::stopped();
                     if was_running {
                         tracing::warn!(
                             "[health] WeChat process disappeared (likely crashed), restarting"
@@ -151,10 +153,40 @@ pub fn spawn_health_monitor() {
                 }
             };
 
-            let screenshot = capture_screenshot(&exec_options)
-                .await
-                .unwrap_or_default();
+            let screenshot = capture_screenshot(&exec_options).await.unwrap_or_default();
             let identified = identify_states(&a11y, &screenshot);
+            // A login may have acquired the GUI while this observation awaited.
+            if MONITORING_PAUSED.load(Ordering::Relaxed) {
+                continue;
+            }
+            if let Some(main) = &identified.main_window {
+                if let Some(reducer) = crate::ia::find_state_by_id(&main.state_id) {
+                    let mut context = {
+                        let db = crate::db::get_db();
+                        crate::context::create_context(session.clone(), &db)
+                    };
+                    context.state = reducer.reduce(&crate::ia::types::ReduceArgs {
+                        prev: &context.state,
+                        a11y: &a11y,
+                        screenshot: &[],
+                    });
+                    crate::auth_snapshot::observe(&context.state);
+                    // Upgrades must recover an already logged-in session without
+                    // waiting for a browser or attempting another GUI login.
+                    if context.state.main_window.is_logged_in
+                        && session.logged_in_user.is_some()
+                        && crate::auth_snapshot::read()["dataReady"] != true
+                        && last_core_prepare.is_none_or(|last| last.elapsed().as_secs() >= 30)
+                    {
+                        crate::tools::wechat_keys::prepare_core_data_async(wechat_pid).await;
+                        last_core_prepare = Some(Instant::now());
+                        if !MONITORING_PAUSED.load(Ordering::Relaxed) {
+                            crate::auth_snapshot::observe(&context.state);
+                        }
+                        last_identified = Instant::now();
+                    }
+                }
+            }
 
             if identified.main_window.is_some() {
                 // State identified — WeChat is responsive

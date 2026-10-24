@@ -21,6 +21,14 @@ export type StatusResponse = {
 export type AuthStatus = {
   status: "logged_in" | "logged_out" | "app_not_running" | "unknown";
   loggedInUser?: string;
+  dataReady?: boolean;
+  phase?: string;
+  protocolVersion?: number;
+  stale?: boolean;
+  updatedAt?: string;
+  observedAt?: string;
+  attemptId?: string;
+  errorCode?: string;
 };
 
 export type VoiceJob = {

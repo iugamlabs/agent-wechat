@@ -3,6 +3,7 @@
 // Run `./scripts/generate-types.sh` to regenerate
 // ============================================
 
+export type { AuthSnapshot } from "./generated/AuthSnapshot.js";
 export type { Chat } from "./generated/Chat.js";
 export type { Contact } from "./generated/Contact.js";
 export type { Message } from "./generated/Message.js";

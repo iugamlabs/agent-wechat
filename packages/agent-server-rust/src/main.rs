@@ -9,6 +9,8 @@ mod tools;
 mod plans;
 mod router;
 mod sessions;
+mod auth_snapshot;
+mod login_jobs;
 
 use std::net::SocketAddr;
 use tracing_subscriber::EnvFilter;
@@ -42,6 +44,7 @@ async fn main() {
     tracing::info!("Initializing database...");
     db::init_db().expect("Failed to initialize database");
     router::recover_interrupted_jobs();
+    login_jobs::recover();
 
     // Initialize sessions
     tracing::info!("Initializing sessions...");

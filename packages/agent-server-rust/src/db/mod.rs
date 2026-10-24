@@ -132,6 +132,10 @@ pub fn get_db() -> std::sync::MutexGuard<'static, Connection> {
         .expect("Database mutex poisoned")
 }
 
+pub fn try_db() -> Option<std::sync::MutexGuard<'static, Connection>> {
+    DB.get().map(|db| db.lock().expect("Database mutex poisoned"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
