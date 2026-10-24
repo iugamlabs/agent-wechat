@@ -226,6 +226,7 @@ where
             let db = get_db();
             context.save(&db);
         }
+        crate::auth_snapshot::observe(&context.state);
 
         // 6. SELECT: plan picks next action
         let selected = plan

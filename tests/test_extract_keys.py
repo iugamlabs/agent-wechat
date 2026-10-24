@@ -57,12 +57,46 @@ class MemoryScanTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             extract.extract_candidates(4242, b'short')
 
-    def test_unknown_build_preserves_legacy_unmasked_fallback(self):
+    def test_unknown_build_validates_raw_and_known_layouts_without_guessing_image_layout(self):
         with patch.object(extract, 'get_build_id', return_value='unknown'), \
              patch('builtins.print'):
             profile = extract.get_build_profile(4242)
-        self.assertIs(profile, extract.BUILD_PROFILES['5233a112'])
-        self.assertNotIn('db_xor_mask', profile)
+        self.assertTrue(profile['db_page_hmac'])
+        self.assertNotIn('image_xor_mask', profile)
+        key = hashlib.sha256(b'unknown build core fixture').digest()
+        mask = extract.BUILD_PROFILES['ce28c347']['db_xor_mask']
+        masked = bytes(a ^ b for a, b in zip(key, mask)).hex()
+        candidates = extract.database_candidates([masked], profile)
+        self.assertIn(masked, candidates)
+        self.assertIn(key.hex(), candidates)
+
+    def test_core_preparation_skips_optional_stores_and_uses_private_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'output.json'
+            databases = [str(Path(directory) / name) for name in ('session.db', 'contact.db', 'message_0.db', 'media_0.db')]
+            for path in databases:
+                Path(path).write_bytes(b'page')
+            with patch('sys.argv', ['extract-keys.py', '--pid', '4242', '--core-only', '--output', str(output)]), \
+                 patch.object(extract, 'find_active_account', return_value='test'), \
+                 patch.object(extract, 'find_databases', return_value=databases), \
+                 patch.object(extract, 'get_build_profile', return_value={}), \
+                 patch.object(extract, 'extract_candidates', return_value=(1, [hashlib.sha256(b'core fixture').hexdigest()])), \
+                 patch.object(extract, 'test_key', return_value='0') as verify, \
+                 patch.object(extract, 'extract_image_keys') as image, \
+                 patch('builtins.print'):
+                extract.main()
+            self.assertEqual(verify.call_count, 3)
+            self.assertFalse(image.called)
+            self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+
+    def test_core_preparation_reports_missing_stores_before_scanning(self):
+        with patch('sys.argv', ['extract-keys.py', '--pid', '4242', '--core-only']), \
+             patch.object(extract, 'find_active_account', return_value='test'), \
+             patch.object(extract, 'find_databases', return_value=['/test/session.db']), \
+             patch.object(extract, 'extract_candidates') as scan, \
+             patch('builtins.print'), self.assertRaises(SystemExit):
+            extract.main()
+        self.assertFalse(scan.called)
 
 
 @unittest.skipUnless(shutil.which('sqlcipher'), 'SQLCipher CLI required')

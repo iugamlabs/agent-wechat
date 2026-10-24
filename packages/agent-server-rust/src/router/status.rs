@@ -9,19 +9,18 @@ use axum::{
 use serde::Deserialize;
 use tokio_util::sync::CancellationToken;
 
-use base64::Engine;
 use crate::context::create_context;
 use crate::db::get_db;
 use crate::execution::run_execution_loop;
 use crate::ia::types::*;
 use crate::ia::{find_state_by_id, identify_states};
-use crate::plans::login::{LoginParams, LoginPlan};
 use crate::plans::logout::{LogoutParams, LogoutPlan};
 use crate::sessions::manager::get_session;
 use crate::tools::a11y::get_a11y_desktop;
 use crate::tools::exec::ExecOptions;
 use crate::tools::qr::{decode_qr_from_base64, to_data_url};
 use crate::tools::screenshot::capture_screenshot;
+use base64::Engine;
 
 pub async fn get_status() -> Json<serde_json::Value> {
     Json(serde_json::json!({
@@ -31,91 +30,9 @@ pub async fn get_status() -> Json<serde_json::Value> {
     }))
 }
 
-/// Check auth status via one FSM observation cycle.
-///
-/// Gets the a11y tree, identifies the current state, and runs
-/// the reducer. Chat states set `is_logged_in = true`.
+/// Cheap cached observation; requests never start a desktop scan.
 pub async fn auth_status() -> Json<serde_json::Value> {
-    let session = match get_session("default") {
-        Some(s) => s,
-        None => {
-            return Json(serde_json::json!({
-                "status": "unknown",
-            }))
-        }
-    };
-
-    // Check if WeChat process is running first
-    let wechat_running = crate::tools::wechat_db::find_wechat_pid().is_some();
-    if !wechat_running {
-        return Json(serde_json::json!({
-            "status": "app_not_running",
-            "loggedInUser": session.logged_in_user,
-        }));
-    }
-
-    let exec_options = ExecOptions {
-        session: Some(session.clone()),
-        timeout_ms: 30_000,
-    };
-
-    // Run one observation: a11y → identify → reduce
-    let a11y = match get_a11y_desktop(&exec_options).await {
-        Ok(tree) => tree,
-        Err(_) => {
-            return Json(serde_json::json!({
-                "status": "unknown",
-                "loggedInUser": session.logged_in_user,
-            }))
-        }
-    };
-
-    let screenshot = capture_screenshot(&exec_options)
-        .await
-        .unwrap_or_default();
-    let identified = identify_states(&a11y, &screenshot);
-
-    // Load persisted state and apply reduce
-    let mut context = {
-        let db = get_db();
-        create_context(session.clone(), &db)
-    };
-
-    if let Some(ref mw) = identified.main_window {
-        if let Some(state_impl) = find_state_by_id(&mw.state_id) {
-            let screenshot_bytes = base64::engine::general_purpose::STANDARD
-                .decode(&screenshot)
-                .unwrap_or_default();
-            context.state = state_impl.reduce(&ReduceArgs {
-                prev: &context.state,
-                a11y: &a11y,
-                screenshot: &screenshot_bytes,
-            });
-        }
-    }
-
-    // Save updated state
-    {
-        let db = get_db();
-        context.save(&db);
-    }
-
-    let status = if context.state.main_window.is_logged_in {
-        "logged_in"
-    } else {
-        "logged_out"
-    };
-
-    tracing::info!(
-        "[auth_status] view={:?}, status={}",
-        context.state.main_window.view,
-        status
-    );
-
-    Json(serde_json::json!({
-        "status": status,
-        "loggedInUser": session.logged_in_user,
-    }))
+    Json(crate::auth_snapshot::read())
 }
 
 /// Log out of WeChat via FSM execution loop.
@@ -226,6 +143,8 @@ pub struct LoginWsParams {
     timeout_ms: u64,
     #[serde(rename = "newAccount", default)]
     new_account: bool,
+    #[serde(rename = "attemptId", default)]
+    attempt_id: Option<String>,
 }
 
 fn default_timeout() -> u64 {
@@ -240,181 +159,84 @@ pub async fn login_ws(
 }
 
 async fn handle_login_ws(mut socket: WebSocket, params: LoginWsParams) {
-    let session = match get_session("default") {
-        Some(s) => s,
-        None => {
-            let msg = serde_json::to_string(&LoginSubscriptionEvent::Error {
-                message: "No session available".to_string(),
-            })
-            .unwrap();
-            let _ = socket.send(Message::Text(msg.into())).await;
+    use serde_json::json;
+    let Some(session) = get_session("default") else {
+        let _ = socket
+            .send(Message::Text(
+                json!({"type":"error","code":"instance_starting",
+            "message":"Session is not ready","retryable":true})
+                .to_string()
+                .into(),
+            ))
+            .await;
+        return;
+    };
+    if params
+        .attempt_id
+        .as_ref()
+        .is_some_and(|id| id.len() != 32 || !id.bytes().all(|b| b.is_ascii_hexdigit()))
+    {
+        let _ = socket
+            .send(Message::Text(
+                json!({"type":"error","code":"invalid_attempt",
+            "message":"Invalid login attempt","retryable":false})
+                .to_string()
+                .into(),
+            ))
+            .await;
+        return;
+    }
+    let (job, start) = match crate::login_jobs::hub().attach(
+        params.attempt_id,
+        params.new_account,
+        std::time::Duration::from_millis(params.timeout_ms.clamp(1_000, 300_000)),
+    ) {
+        Ok(value) => value,
+        Err(code) => {
+            let _ = socket
+                .send(Message::Text(
+                    json!({"type":"error","code":code,
+                "message":"Another login is already active","retryable":true})
+                    .to_string()
+                    .into(),
+                ))
+                .await;
             return;
         }
     };
-
-    // Send initial status
-    let msg = serde_json::to_string(&LoginSubscriptionEvent::Status {
-        message: "Navigating login flow...".to_string(),
-    })
-    .unwrap();
-    if socket.send(Message::Text(msg.into())).await.is_err() {
-        return;
+    let mut updates = job.updates.subscribe();
+    if start {
+        tokio::spawn(crate::login_jobs::run(job, session));
     }
-
-    // Channel to bridge sync emit callback → async WebSocket sends
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<SubscriptionEvent>();
-    let cancel = CancellationToken::new();
-    let cancel_for_exec = cancel.clone();
-    let login_params = LoginParams {
-        new_account: params.new_account,
-    };
-
-    // Spawn the execution loop in a separate task
-    let exec_handle = tokio::spawn(async move {
-        let mut context = {
-            let db = get_db();
-            create_context(session, &db)
-        };
-        let plan = LoginPlan;
-        let emit = move |event: SubscriptionEvent| {
-            let _ = tx.send(event);
-        };
-        run_execution_loop(&plan, &login_params, &mut context, &emit, cancel_for_exec).await.0
-    });
-
-    // Main loop: bridge events to WebSocket, handle timeout + disconnect
-    let timeout = tokio::time::sleep(std::time::Duration::from_millis(params.timeout_ms));
-    tokio::pin!(timeout);
-    let mut sent_terminal = false;
-    let mut client_disconnected = false;
-    let mut server_timeout = false;
-
     loop {
-        tokio::select! {
-            event = rx.recv() => {
-                match event {
-                    Some(evt) => {
-                        let ws_event = subscription_event_to_login_event(evt);
-                        if is_terminal_login_event(&ws_event) {
-                            sent_terminal = true;
-                        }
-                        let msg = serde_json::to_string(&ws_event).unwrap();
-                        if socket.send(Message::Text(msg.into())).await.is_err() {
-                            cancel.cancel();
-                            client_disconnected = true;
-                            break;
-                        }
-                    }
-                    None => break, // channel closed = execution done
-                }
-            }
-            _ = &mut timeout => {
-                cancel.cancel();
-                server_timeout = true;
-                sent_terminal = true;
-                let msg = serde_json::to_string(&LoginSubscriptionEvent::LoginTimeout).unwrap();
-                if socket.send(Message::Text(msg.into())).await.is_err() {
-                    client_disconnected = true;
-                }
-                break;
-            }
-            msg = socket.recv() => {
-                match msg {
-                    Some(Ok(_)) => continue,
-                    _ => {
-                        cancel.cancel();
-                        client_disconnected = true;
-                        break;
-                    }
-                }
-            }
+        let progress = updates.borrow_and_update().clone();
+        if socket
+            .send(Message::Text(progress.event.to_string().into()))
+            .await
+            .is_err()
+        {
+            break;
         }
-    }
-
-    // Wait for execution to finish and emit a fallback terminal event if needed.
-    let exec_result = exec_handle.await.ok();
-    if !client_disconnected && !sent_terminal {
-        let fallback = match exec_result {
-            Some(result) if result.success => LoginSubscriptionEvent::LoginSuccess { user_id: None },
-            Some(result) => {
-                let message = result.error.unwrap_or_else(|| "Login failed".to_string());
-                if message.starts_with("Unknown state for")
-                    || message.starts_with("Execution timeout after")
-                    || (server_timeout && message == "Aborted")
+        if progress.event["type"] != "qr" {
+            if let Some(qr) = progress.qr {
+                if socket
+                    .send(Message::Text(qr.to_string().into()))
+                    .await
+                    .is_err()
                 {
-                    LoginSubscriptionEvent::LoginTimeout
-                } else {
-                    LoginSubscriptionEvent::Error { message }
+                    break;
                 }
             }
-            None => LoginSubscriptionEvent::Error {
-                message: "Login execution task failed".to_string(),
-            },
-        };
-        let msg = serde_json::to_string(&fallback).unwrap();
-        let _ = socket.send(Message::Text(msg.into())).await;
-    }
-}
-
-fn is_terminal_login_event(event: &LoginSubscriptionEvent) -> bool {
-    matches!(
-        event,
-        LoginSubscriptionEvent::LoginSuccess { .. }
-            | LoginSubscriptionEvent::LoginTimeout
-            | LoginSubscriptionEvent::Error { .. }
-    )
-}
-
-/// Convert generic SubscriptionEvent (from plans) to typed LoginSubscriptionEvent (for WS).
-fn subscription_event_to_login_event(event: SubscriptionEvent) -> LoginSubscriptionEvent {
-    match event.event_type.as_str() {
-        "status" => LoginSubscriptionEvent::Status {
-            message: event
-                .data
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
-        },
-        "qr" => {
-            let qr_data = event
-                .data
-                .get("qrData")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let qr_data_url = to_data_url(&qr_data).ok();
-            LoginSubscriptionEvent::Qr {
-                qr_data,
-                qr_binary_data: None,
-                qr_data_url,
+        }
+        if progress.terminal {
+            break;
+        }
+        tokio::select! {
+            changed=updates.changed()=>{ if changed.is_err() { break; } },
+            received=socket.recv()=>{
+                if !matches!(received,Some(Ok(Message::Ping(_) | Message::Pong(_)))) { break; }
             }
         }
-        "phone_confirm" => LoginSubscriptionEvent::PhoneConfirm {
-            message: event
-                .data
-                .get("message")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
-        },
-        "login_success" => LoginSubscriptionEvent::LoginSuccess {
-            user_id: event
-                .data
-                .get("userId")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
-        },
-        "login_timeout" => LoginSubscriptionEvent::LoginTimeout,
-        "error" => LoginSubscriptionEvent::Error {
-            message: event
-                .data
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Unknown error")
-                .to_string(),
-        },
-        _ => LoginSubscriptionEvent::Status {
-            message: format!("Unknown event: {}", event.event_type),
-        },
     }
+    // Dropping a subscriber does not stop the bounded server-owned task.
 }

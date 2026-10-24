@@ -168,6 +168,7 @@ export const messageSchema = z.object({
   sender: z.string().optional(),
   senderName: z.string().optional(),
   type: z.number().int(),
+  appMsgType: z.number().int().positive().optional(),
   content: z.string(),
   timestamp: z.string(),
 });

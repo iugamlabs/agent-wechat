@@ -202,8 +202,8 @@ echo "Starting agent-server on port ${AGENT_PORT:-6174}..."
 while true; do
   /opt/agent-server/agent-server &
   SERVER_PID=$!
-  wait $SERVER_PID
-  EXIT_CODE=$?
+  EXIT_CODE=0
+  wait "$SERVER_PID" || EXIT_CODE=$?
   # Exit cleanly on SIGTERM (container shutdown)
   if [ $EXIT_CODE -eq 143 ]; then
     exit 0

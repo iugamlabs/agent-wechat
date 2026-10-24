@@ -6,19 +6,62 @@ use std::collections::HashMap;
 /// Extract all WeChat DB credentials (async, non-blocking).
 /// Calls the Python extract-keys script.
 pub async fn extract_keys_async(wechat_pid: i64) -> HashMap<String, String> {
-    let out_path = format!("/tmp/wechat_keys_{wechat_pid}.json");
+    extract_keys(wechat_pid, false).await
+}
 
-    let _ = exec_command(
+pub async fn prepare_core_data_async(wechat_pid: i64) -> HashMap<String, String> {
+    extract_keys(wechat_pid, true).await
+}
+
+async fn extract_keys(wechat_pid: i64, core_only: bool) -> HashMap<String, String> {
+    // All callers (login, chats and contacts) share one extraction per process.
+    static EXTRACTION: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _guard = EXTRACTION.lock().await;
+    let (Some(session), Some(account)) = (
+        crate::sessions::manager::get_session("default"),
+        super::wechat_db::find_account_dir(wechat_pid),
+    ) else {
+        return HashMap::new();
+    };
+    {
+        let db = crate::db::get_db();
+        if if core_only {
+            core_data_ready(&db, &session.id, &account)
+        } else {
+            !needs_key_extraction(&db, &session.id, &account)
+        } {
+            return get_stored_keys(&db, &session.id, &account);
+        }
+    }
+    let out_path = format!(
+        "/tmp/wechat_keys_{}_{}.json",
+        wechat_pid,
+        uuid::Uuid::new_v4()
+    );
+    struct Cleanup(String);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    let _cleanup = Cleanup(out_path.clone());
+
+    let pid = wechat_pid.to_string();
+    let mut args = vec![
+        "HOME=/home/wechat",
+        "python3",
+        "/opt/tools/extract-keys.py",
+        "--pid",
+        &pid,
+        "--output",
+        &out_path,
+    ];
+    if core_only {
+        args.push("--core-only");
+    }
+    let result = exec_command(
         "env",
-        &[
-            "HOME=/home/wechat",
-            "python3",
-            "/opt/tools/extract-keys.py",
-            "--pid",
-            &wechat_pid.to_string(),
-            "--output",
-            &out_path,
-        ],
+        &args,
         &ExecOptions {
             timeout_ms: 120_000,
             ..Default::default()
@@ -26,6 +69,14 @@ pub async fn extract_keys_async(wechat_pid: i64) -> HashMap<String, String> {
     )
     .await;
 
+    if result.exit_code != 0 {
+        tracing::warn!(
+            exit_code = result.exit_code,
+            timed_out = result.stderr == "Command timed out",
+            core_only,
+            "WeChat data preparation did not finish cleanly"
+        );
+    }
     let result = (|| -> Option<HashMap<String, String>> {
         let content = std::fs::read_to_string(&out_path).ok()?;
         let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
@@ -48,7 +99,68 @@ pub async fn extract_keys_async(wechat_pid: i64) -> HashMap<String, String> {
     // Clean up temp file
     let _ = std::fs::remove_file(&out_path);
 
-    result.unwrap_or_default()
+    let result = result.unwrap_or_default();
+    if super::wechat_db::find_account_dir(wechat_pid).as_ref() == Some(&account)
+        && super::wechat_db::find_wechat_pid() == Some(wechat_pid)
+    {
+        let db = crate::db::get_db();
+        store_keys(&db, &session.id, &account, &result);
+    } else {
+        tracing::warn!("WeChat identity changed during data preparation");
+        return HashMap::new();
+    }
+    result
+}
+
+/// A UI login is usable only when core local stores can actually be opened.
+/// Optional media/image credentials do not block the basic session.
+pub fn core_data_ready(conn: &Connection, session: &str, account: &str) -> bool {
+    let keys = get_stored_keys(conn, session, account);
+    let mut required = vec!["session.db".to_string(), "contact.db".to_string()];
+    required.extend(
+        list_account_dbs(account)
+            .into_iter()
+            .filter(|name| name.starts_with("message_")),
+    );
+    let paths = required
+        .into_iter()
+        .map(|name| {
+            let path = get_db_path(account, &name);
+            (name, path)
+        })
+        .collect::<Vec<_>>();
+    readable_stores(&keys, &paths)
+}
+
+fn readable_stores(keys: &HashMap<String, String>, paths: &[(String, String)]) -> bool {
+    paths
+        .iter()
+        .all(|(name, path)| keys.get(name).is_some_and(|key| verify_key(path, key)))
+}
+
+#[cfg(test)]
+mod readiness_tests {
+    use super::*;
+    #[test]
+    fn readiness_requires_valid_core_credentials_but_not_conversations_or_media() {
+        let directory = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        std::fs::create_dir(&directory).unwrap();
+        let key = "11".repeat(32);
+        let mut keys = HashMap::new();
+        let paths=["session.db","contact.db"].map(|name| {
+            let path=directory.join(name);
+            let conn=Connection::open(&path).unwrap();
+            conn.execute_batch(&format!("PRAGMA key = \"x'{key}'\"; PRAGMA cipher_compatibility=4; CREATE TABLE empty_store(id INTEGER);")).unwrap();
+            keys.insert(name.to_string(),key.clone());
+            (name.to_string(),path.to_string_lossy().to_string())
+        });
+        assert!(readable_stores(&keys, &paths));
+        keys.insert("contact.db".into(), "22".repeat(32));
+        assert!(!readable_stores(&keys, &paths));
+        keys.remove("contact.db");
+        assert!(!readable_stores(&keys, &paths));
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 }
 
 /// Get stored keys for a session + account from the agent DB.
@@ -66,10 +178,7 @@ pub fn get_stored_keys(
 
     let rows = stmt
         .query_map(params![session_id, account_dir], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-            ))
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })
         .unwrap();
 
@@ -150,11 +259,7 @@ pub fn verify_key(db_path: &str, hex_key: &str) -> bool {
 /// 1. Check that all required DB keys exist in stored_keys
 /// 2. Scan disk for additional required DBs (message_N, media_N) without keys
 /// 3. Spot-check one key for validity
-pub fn needs_key_extraction(
-    conn: &Connection,
-    session_id: &str,
-    account_dir: &str,
-) -> bool {
+pub fn needs_key_extraction(conn: &Connection, session_id: &str, account_dir: &str) -> bool {
     let stored_keys = get_stored_keys(conn, session_id, account_dir);
 
     if stored_keys.is_empty() {
@@ -205,7 +310,11 @@ pub fn needs_key_extraction(
     if !missing_on_disk.is_empty() {
         tracing::info!(
             "[wechat-keys] Missing keys for on-disk DBs: {}",
-            missing_on_disk.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+            missing_on_disk
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
         );
         return true;
     }

@@ -313,9 +313,26 @@ def get_build_profile(pid):
             print(f"Build: {build_id[:16]}... ({prefix})")
             return BUILD_PROFILES[prefix]
         print(f"WARNING: Unknown BuildID {build_id}. Image key extraction may fail.")
-    # Fall back to first profile (aarch64)
-    # Preserve the historical fallback regardless of profile insertion order.
-    return BUILD_PROFILES["5233a112"]
+    # Unknown builds must verify candidates before invoking SQLCipher. Keep raw
+    # candidates and try the known DB layouts; a page HMAC and a schema query
+    # must both pass. Do not assume an image layout for an unknown build.
+    masks = {profile["db_xor_mask"] for profile in BUILD_PROFILES.values()
+             if "db_xor_mask" in profile}
+    return {"db_page_hmac": True, "db_candidate_masks": sorted(masks)}
+
+
+def database_candidates(raw_keys, profile):
+    masks = profile.get("db_candidate_masks", [])
+    keys = set(raw_keys)
+    for raw in raw_keys:
+        value = bytes.fromhex(raw)
+        keys.update(bytes(a ^ b for a, b in zip(value, mask)).hex() for mask in masks)
+    return sorted(keys)
+
+
+def core_database(path):
+    name = os.path.basename(path)
+    return name in ("session.db", "contact.db") or name.startswith("message_")
 
 
 def extract_image_aes_key(pid, profile):
@@ -385,6 +402,8 @@ def main():
                         help="Output JSON path (default: db_keys.json next to databases)")
     parser.add_argument("--pid", type=int, default=None,
                         help="WeChat PID (auto-detected if not specified)")
+    parser.add_argument("--core-only", action="store_true",
+                        help="Prepare session/contact/message access without optional media setup")
     args = parser.parse_args()
 
     pid = args.pid or find_wechat_pid()
@@ -404,12 +423,18 @@ def main():
     if not databases:
         print("ERROR: No WeChat databases found in ~/Documents/xwechat_files/")
         sys.exit(1)
+    if args.core_only:
+        databases = [path for path in databases if core_database(path)]
+        if not {"session.db", "contact.db"}.issubset({os.path.basename(path) for path in databases}):
+            print("ERROR: Core WeChat stores are not available yet")
+            sys.exit(1)
     print(f"Databases: {len(databases)}")
 
     profile = get_build_profile(pid)
 
     print("Extracting key candidates from memory...")
     ctx_count, raw_keys = extract_candidates(pid, profile.get("db_xor_mask"))
+    raw_keys = database_candidates(raw_keys, profile)
     print(f"  Structures found: {ctx_count}")
     print(f"  Candidates: {len(raw_keys)}")
 
@@ -452,7 +477,7 @@ def main():
                 count = test_key(db_path, key)
                 if count is not None:
                     results[db_name] = {"key": key, "tables": count, "path": db_path}
-                    print(f"  {db_name}: {key[:16]}... ({count} tables)")
+                    print(f"  {db_name}: ready ({count} tables)")
                     found = True
                     break
             if not found:
@@ -489,13 +514,16 @@ def main():
     }
 
     # Image access keys
-    try:
-        image_keys = extract_image_keys(pid, profile)
-        output["keys"].update(image_keys)
-    except Exception as e:
-        print(f"  Image key setup failed: {e}")
+    if not args.core_only and "image_xor_mask" in profile:
+        try:
+            image_keys = extract_image_keys(pid, profile)
+            output["keys"].update(image_keys)
+        except Exception as e:
+            print(f"  Image key setup failed: {e}")
 
-    with open(out_path, 'w') as f:
+    descriptor = os.open(out_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(descriptor, 0o600)
+    with os.fdopen(descriptor, 'w') as f:
         json.dump(output, f, indent=2)
     print(f"Saved to: {out_path}")
 
